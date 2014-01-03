@@ -38,7 +38,7 @@ publishTo <<= version { (v: String) =>
 credentials += Credentials(Path.userHome / ".sbt" / "sonatype.properties")
 
 pomExtra := (
-<url>http://github.com/ktoso/akka</url>
+<url>http://github.com/ktoso/akka-persistence-hbase</url>
 <licenses>
   <license>
     <name>Apache 2 License</name>
@@ -47,8 +47,8 @@ pomExtra := (
   </license>
 </licenses>
 <scm>
-  <url>git@github.com:ktoso/scala-words.git</url>
-  <connection>scm:git:git@github.com:ktoso/scala-words.git</connection>
+  <url>git@github.com:ktoso/akka-persistence-hbase.git</url>
+  <connection>scm:git:git@github.com:ktoso/akka-persistence-hbase.git</connection>
 </scm>
 <developers>
   <developer>
@@ -62,4 +62,3 @@ pomExtra := (
   <artifactId>oss-parent</artifactId>
   <version>7</version>
 </parent>)
-)
