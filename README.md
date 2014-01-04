@@ -34,7 +34,7 @@ The async journal will be implemented soon by using a fully async driver (the de
 TODO
 ----
 
-* Rewrite the Async Journal to use: [AsyncBase](https://github.com/OpenTSDB/asynchbase).
+* I'm currently implementing a fully async version using [AsyncBase](https://github.com/OpenTSDB/asynchbase).
 
 License
 -------
