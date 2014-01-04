@@ -9,6 +9,7 @@ import org.hbase.async.{HBaseClient => AsyncBaseClient, DeleteRequest, KeyValue,
 import org.apache.hadoop.hbase.util.Bytes
 import com.stumbleupon.async.{Deferred, Callback}
 import java.util
+import akka.actor.Status.Success
 
 /**
  * Asyncronous HBase Journal.
@@ -53,30 +54,18 @@ class HBaseAsyncWriteJournal extends AsyncWriteJournal with HBaseJournalBase
 
   // todo most probably racy internally... fix me
   override def deleteAsync(processorId: String, fromSequenceNr: Long, toSequenceNr: Long, permanent: Boolean): Future[Unit] = {
-    val scanner = asyncClient.newScanner(toBytes(Table))
-    scanner.setStartKey(toBytes(fromSequenceNr))
-    scanner.setStopKey(toBytes(toSequenceNr))
-
-    val delete =
+    val issueDelete =
       if (permanent) deleteRow _
       else markRowAsDeleted _
 
-    // todo complete when all deletes went through
-    val allScanned = Promise()
-    scanner.nextRows(1)
-      .addCallback(new Callback[AnyRef, util.ArrayList[util.ArrayList[KeyValue]]] {
-        def call(rows: util.ArrayList[util.ArrayList[KeyValue]]): AnyRef = {
-          val key = scanner.getCurrentKey // todo seems racy...
-          if(rows != null) {
-            delete(key) // todo should await on all deletes
-          } else {
-            // end of processing
-            allScanned.complete(null)
-          }
-        }
-      })
-
-    allScanned.future
+    Future {
+      scan(processorId, fromSequenceNr, toSequenceNr) { res =>
+        val key = res.getRow
+        issueDelete(key)
+      }
+    } flatMap { deletes =>
+      Future.sequence(deletes).asInstanceOf[Future[Unit]]
+    }
   }
 
   /** WARNING: Plain HBase does not provide async APIs, thus this impl. only wraps the syncronous operations in a Future. */
@@ -96,11 +85,17 @@ class HBaseAsyncWriteJournal extends AsyncWriteJournal with HBaseJournalBase
     p.future
   }
 
-  private def deleteRow(key: Array[Byte]): Deferred[AnyRef] = {
+  private def deleteRow(key: Array[Byte]): Future[Unit] = {
+    val p = Promise[Unit]()
     asyncClient.delete(new DeleteRequest(TableBytes, key))
+      .addCallback(new Callback[AnyRef, AnyRef] {
+      def call(arg: AnyRef) = p.complete(null)
+    })
+    p.future
   }
 
-  private def markRowAsDeleted(key: Array[Byte]): Deferred[AnyRef] = {
+  private def markRowAsDeleted(key: Array[Byte]): Future[Unit] = {
+    val p = Promise[Unit]()
     asyncClient.put(
       new PutRequest(
         TableBytes,
@@ -109,7 +104,10 @@ class HBaseAsyncWriteJournal extends AsyncWriteJournal with HBaseJournalBase
         Array(Marker),
         Array(DeletedMarkerBytes)
       )
-    )
+    ).addCallback(new Callback[AnyRef, AnyRef] {
+      def call(arg: AnyRef) = p.complete(null)
+    })
+    p.future
   }
 
   override def postStop(): Unit = {
