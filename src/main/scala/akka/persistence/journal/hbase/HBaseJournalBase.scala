@@ -9,6 +9,8 @@ import akka.serialization.SerializationExtension
 import HBaseJournalInit._
 import scala.collection.mutable.ListBuffer
 import akka.actor.{Actor, ActorLogging}
+import org.apache.hadoop.hbase.ipc.HBaseClient
+import org.apache.hadoop.hbase.io.ImmutableBytesWritable
 
 trait HBaseJournalBase {
   this: Actor with ActorLogging with HBaseAsyncReplay with PersistenceMarkers =>
@@ -26,7 +28,10 @@ trait HBaseJournalBase {
   val scanBatchSize = config.getInt("scan-batch-size")
 
 
-  val table = new HTable(hadoopConfig, config.getString("table"))
+  val Table = config.getString("table")
+  val TableBytes = toBytes(Table)
+
+  val table = new HTable(hadoopConfig, Table)
 
   protected def rowKey(processorId: String, sequenceNr: Long): Array[Byte] = {
     @inline def padded(l: Long) = String.valueOf(l).reverse.padTo(20, "0").reverse.mkString
@@ -44,25 +49,37 @@ trait HBaseJournalBase {
   import Columns._
 
   def write(persistentBatch: Seq[PersistentRepr]): Unit = {
-    val puts = persistentBatch map { p =>
+    val puts = preparePuts(persistentBatch)
+
+    table.batch(puts.asJava)
+  }
+
+
+  protected def preparePuts(persistentBatch: Seq[PersistentRepr]): Seq[Put] = {
+    persistentBatch map { p =>
       import p._
 
       val put = new Put(rowKey(p.processorId, sequenceNr))
       put.add(Family, ProcessorId, toBytes(p.processorId))
-      put.add(Family, SequenceNr,  toBytes(sequenceNr))
-      put.add(Family, Marker,      toBytes(AcceptedMarker))
-      put.add(Family, Message,     persistentToBytes(p))
+      put.add(Family, SequenceNr, toBytes(sequenceNr))
+      put.add(Family, Marker, AcceptedMarkerBytes)
+      put.add(Family, Message, persistentToBytes(p))
     }
-
-    table.batch(puts.asJava)
   }
 
   def delete(processorId: String, fromSequenceNr: Long, toSequenceNr: Long, permanent: Boolean): Unit = {
     scan(processorId, fromSequenceNr, toSequenceNr) { res =>
       val row = res.getRow
 
-      log.debug(s"Prepare Delete for row: ${Bytes.toString(row)}")
-      table.delete(new Delete(row))
+      log.debug(s"Prepare Delete for (permanent: $permanent) row: ${Bytes.toString(row)}")
+
+      if (permanent) {
+        table.delete(new Delete(row))
+      } else {
+        val put = new Put(row)
+        put.add(Family, Marker, DeletedMarkerBytes)
+        table.put(put)
+      }
     }
   }
 
@@ -70,7 +87,7 @@ trait HBaseJournalBase {
     log.debug(s"Confirm message for processorId:[$processorId], sequenceNr:$sequenceNr, marker: ${confirmedMarker(channelId)}")
 
     val p = new Put(rowKey(processorId, sequenceNr))
-    p.add(Family, Marker, toBytes(confirmedMarker(channelId)))
+    p.add(Family, Marker, confirmedMarkerBytes(channelId))
     table.put(p)
   }
 

@@ -2,9 +2,10 @@ organization := "pl.project13.scala"
 
 name := "akka-persistence-hbase"
 
-version := "0.1"
+version := "0.2-SNAPSHOT"
 
 scalaVersion := "2.10.2"
+
 
 libraryDependencies += "org.apache.hadoop" % "hadoop-core"   % "1.1.2"
 
@@ -12,11 +13,15 @@ libraryDependencies += "org.apache.hadoop" % "hadoop-client" % "1.1.2"
 
 libraryDependencies += "org.apache.hbase"  % "hbase"         % "0.94.6.1"
 
+libraryDependencies += "org.hbase"         % "asynchbase"    % "1.4.1"
+
+
 libraryDependencies += "com.typesafe.akka" %% "akka-persistence-experimental" % "2.3-M2" % "compile"
+
 
 libraryDependencies += "com.typesafe.akka" %% "akka-testkit" % "2.3-M2" % "test"
 
-libraryDependencies += "org.scalatest" %% "scalatest" % "2.0" % "test"
+libraryDependencies += "org.scalatest"     %% "scalatest"    % "2.0" % "test"
 
 
 // publishing settings
