@@ -16,7 +16,7 @@ The artifact is published to Maven Central, so in order to use it you just have 
 Configuration
 -------------
 
-To activate the Cassandra journal plugin, add the following line to your Akka `application.conf`:
+To activate the HBase journal plugin, add the following line to your Akka `application.conf`:
 
     akka.persistence.journal.plugin = "hbase-journal"
 
