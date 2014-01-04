@@ -5,7 +5,6 @@ import akka.testkit.{TestProbe, ImplicitSender, TestKit}
 import akka.actor.{Actor, Props, ActorSystem}
 import org.scalatest._
 import scala.concurrent.duration._
-import org.apache.hadoop.hbase.client.{HTable, HBaseAdmin}
 
 object HBaseJournalSpec {
 

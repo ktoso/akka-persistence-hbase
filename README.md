@@ -6,8 +6,9 @@ A replicated [Akka Persistence](http://doc.akka.io/docs/akka/2.3-M2/scala/persis
 Usage
 -----
 
-in `build.sbt`
+The artifact is published to Maven Central, so in order to use it you just have to add the following dependency:
 
+    // build.sbt style:
     libraryDependencies += "pl.project13.scala" %% "akka-persistence-hbase" % "0.1-SNAPSHOT"
 
 Configuration
