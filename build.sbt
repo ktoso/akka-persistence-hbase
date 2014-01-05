@@ -15,6 +15,7 @@ libraryDependencies += "org.apache.hbase"  % "hbase"         % "0.94.6.1"
 
 libraryDependencies += "org.hbase"         % "asynchbase"    % "1.4.1"
 
+libraryDependencies +=  "com.jsuereth" %% "scala-arm" % "1.3"
 
 libraryDependencies += "com.typesafe.akka" %% "akka-persistence-experimental" % "2.3-M2" % "compile"
 

@@ -6,6 +6,8 @@ import akka.actor.{Actor, Props, ActorSystem}
 import org.scalatest._
 import scala.concurrent.duration._
 import org.apache.hadoop.hbase.client.HBaseAdmin
+import com.typesafe.config.{ConfigFactory, ConfigValue, Config}
+import scala.collection.immutable.Seq
 
 object HBaseJournalSpec {
 
@@ -41,95 +43,100 @@ object HBaseJournalSpec {
   }
 }
 
-class HBaseSyncWriteJournalSpec extends TestKit(ActorSystem("test")) with ImplicitSender with FlatSpecLike with Matchers with BeforeAndAfterAll {
+trait HBaseJournalBehavior extends ImplicitSender with Suite with FlatSpecLike with Matchers with BeforeAndAfterAll {
+  this: TestKit  =>
 
   import HBaseJournalSpec._
 
-  lazy val config = system.settings.config.getConfig("hbase-journal")
+  def config: Config
 
-  behavior of "HBaseSyncWriteJournal"
+  def classUnderTest: String
+
+  behavior of classUnderTest
 
   override protected def beforeAll() {
     HBaseJournalInit.createTable(config)
   }
 
-  it should "write and replay messages" in {
-    val processor1 = system.actorOf(Props(classOf[ProcessorA], "p1"))
+  def journalBehavior = {
+    it should "write and replay messages" in {
+      val processor1 = system.actorOf(Props(classOf[ProcessorA], "p1"))
 
-    within(10.seconds) {
-      processor1 ! Persistent("a")
-      processor1 ! Persistent("aa")
-      expectMsgAllOf("a", 1L, false)
-      expectMsgAllOf("aa", 2L, false)
+      within(10.seconds) {
+        processor1 ! Persistent("a")
+        processor1 ! Persistent("aa")
+        expectMsgAllOf("a", 1L, false)
+        expectMsgAllOf("aa", 2L, false)
+      }
+
+      val processor2 = system.actorOf(Props(classOf[ProcessorA], "p1"))
+      within(10.seconds) {
+        processor2 ! Persistent("b")
+        processor2 ! Persistent("c")
+        expectMsgAllOf("a", 1L, true)
+        expectMsgAllOf("aa", 2L, true)
+        expectMsgAllOf("b", 3L, false)
+        expectMsgAllOf("c", 4L, false)
+      }
     }
 
-    val processor2 = system.actorOf(Props(classOf[ProcessorA], "p1"))
-    within(10.seconds) {
-      processor2 ! Persistent("b")
+    it should "not replay messages marked as deleted" in {
+      val deleteProbe = TestProbe()
+      subscribeToDeletion(deleteProbe)
+
+      val processor1 = system.actorOf(Props(classOf[ProcessorA], "p2"))
+      within(10.seconds) {
+        processor1 ! Persistent("a")
+        processor1 ! Persistent("b")
+        expectMsgAllOf("a", 1L, false)
+        expectMsgAllOf("b", 2L, false)
+        processor1 ! Delete(1L, false)
+        awaitDeletion(deleteProbe)
+
+        system.actorOf(Props(classOf[ProcessorA], "p2"))
+        expectMsgAllOf("b", 2L, true)
+      }
+    }
+
+    it should "not replay permanently deleted messages" in {
+      val deleteProbe = TestProbe()
+      subscribeToDeletion(deleteProbe)
+
+      val processor1 = system.actorOf(Props(classOf[ProcessorA], "p3"))
+      within(10.seconds) {
+        processor1 ! Persistent("a")
+        processor1 ! Persistent("b")
+        expectMsgAllOf("a", 1L, false)
+        expectMsgAllOf("b", 2L, false)
+        processor1 ! Delete(1L, true)
+        awaitDeletion(deleteProbe)
+
+        system.actorOf(Props(classOf[ProcessorA], "p3"))
+        expectMsgAllOf("b", 2L, true)
+      }
+    }
+
+    it should "write delivery confirmations" in {
+      val confirmProbe = TestProbe()
+      subscribeToConfirmation(confirmProbe)
+
+      val processor1 = system.actorOf(Props(classOf[ProcessorB], "p4"))
+      within(10.seconds) {
+        processor1 ! Persistent("a")
+        processor1 ! Persistent("b")
+        expectMsg("a-1")
+        expectMsg("b-2")
+      }
+
+      awaitConfirmation(confirmProbe)
+      awaitConfirmation(confirmProbe)
+
+      val processor2 = system.actorOf(Props(classOf[ProcessorB], "p4"))
       processor2 ! Persistent("c")
-      expectMsgAllOf("a", 1L, true)
-      expectMsgAllOf("aa", 2L, true)
-      expectMsgAllOf("b", 3L, false)
-      expectMsgAllOf("c", 4L, false)
+      expectMsg(max = 5.seconds, "a-1")
+      expectMsg(max = 5.seconds, "b-2")
+      expectMsg(max = 5.seconds, "c-3")
     }
-  }
-
-  it should "not replay messages marked as deleted" in {
-    val deleteProbe = TestProbe()
-    subscribeToDeletion(deleteProbe)
-
-    val processor1 = system.actorOf(Props(classOf[ProcessorA], "p2"))
-    within(10.seconds) {
-      processor1 ! Persistent("a")
-      processor1 ! Persistent("b")
-      expectMsgAllOf("a", 1L, false)
-      expectMsgAllOf("b", 2L, false)
-      processor1 ! Delete(1L, false)
-      awaitDeletion(deleteProbe)
-
-      system.actorOf(Props(classOf[ProcessorA], "p2"))
-      expectMsgAllOf("b", 2L, true)
-    }
-  }
-
-  it should "not replay permanently deleted messages" in {
-    val deleteProbe = TestProbe()
-    subscribeToDeletion(deleteProbe)
-
-    val processor1 = system.actorOf(Props(classOf[ProcessorA], "p3"))
-    within(10.seconds) {
-      processor1 ! Persistent("a")
-      processor1 ! Persistent("b")
-      expectMsgAllOf("a", 1L, false)
-      expectMsgAllOf("b", 2L, false)
-      processor1 ! Delete(1L, true)
-      awaitDeletion(deleteProbe)
-
-      system.actorOf(Props(classOf[ProcessorA], "p3"))
-      expectMsgAllOf("b", 2L, true)
-    }
-  }
-
-  it should "write delivery confirmations" in {
-    val confirmProbe = TestProbe()
-    subscribeToConfirmation(confirmProbe)
-
-    val processor1 = system.actorOf(Props(classOf[ProcessorB], "p4"))
-    within(10.seconds) {
-      processor1 ! Persistent("a")
-      processor1 ! Persistent("b")
-      expectMsg("a-1")
-      expectMsg("b-2")
-    }
-
-    awaitConfirmation(confirmProbe)
-    awaitConfirmation(confirmProbe)
-
-    val processor2 = system.actorOf(Props(classOf[ProcessorB], "p4"))
-    processor2 ! Persistent("c")
-    expectMsg(max = 5.seconds, "a-1")
-    expectMsg(max = 5.seconds, "b-2")
-    expectMsg(max = 5.seconds, "c-3")
   }
 
 
@@ -148,11 +155,15 @@ class HBaseSyncWriteJournalSpec extends TestKit(ActorSystem("test")) with Implic
   override protected def afterAll() {
     val tableName = config.getString("table")
 
-//    val admin = new HBaseAdmin(HBaseJournalInit.getHBaseConfig(config))
-//    admin.disableTable(tableName)
-//    admin.deleteTable(tableName)
-//    admin.close()
+    val admin = new HBaseAdmin(HBaseJournalInit.getHBaseConfig(config))
+    admin.disableTable(tableName)
+    admin.deleteTable(tableName)
+    admin.close()
 
     system.shutdown()
   }
+}
+
+class HbaseAsyncWriteJournalSpec extends TestKit(ActorSystem("sync-test")) with HBaseJournalBehavior {
+  it should behave like journalBehavior
 }
