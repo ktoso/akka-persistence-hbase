@@ -2,7 +2,7 @@ organization := "pl.project13.scala"
 
 name := "akka-persistence-hbase"
 
-version := "0.2"
+version := "0.3-SNAPSHOT"
 
 scalaVersion := "2.10.2"
 
