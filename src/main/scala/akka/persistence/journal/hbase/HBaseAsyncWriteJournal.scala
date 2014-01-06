@@ -9,8 +9,9 @@ import akka.actor.ActorLogging
 import org.hbase.async.{HBaseClient => AsyncBaseClient, KeyValue, DeleteRequest, PutRequest}
 import org.apache.hadoop.hbase.util.Bytes
 import com.stumbleupon.async.Callback
-import java.{util => ju, util}
+import java.{util => ju}
 import java.util.concurrent.atomic.AtomicInteger
+import scala.util.Success
 
 /**
  * Asyncronous HBase Journal.
@@ -31,27 +32,16 @@ class HBaseAsyncWriteJournal extends AsyncWriteJournal with HBaseJournalBase
   val initTimeout = config.getInt("init.timeout").seconds
   val zookeeperQuorum = config.getString("hbase.zookeeper.quorum")
 
-  val client = new AsyncBaseClient(zookeeperQuorum)
-
-
-  /** Used to avoid writing all data to the same region - see "hot region" problem */
-  def partition(snr: Long) = (snr % partitionCount).toInt
-
-  /** Number of regions the used Table is partitioned to. */
-  var partitionCount: Int = _
-
-  /** We must determine the number of regions this table uses before we start reading from it. */
-  override def preStart() {
-    val regionsCount = countRegions(Table)
-    partitionCount = Await.result(regionsCount, atMost = initTimeout)
-  }
+  val client = HBaseAsyncWriteJournal.getClient(zookeeperQuorum)
 
   override def writeAsync(persistentBatch: Seq[PersistentRepr]): Future[Unit] = {
+    log.debug(s"Write async for ${persistentBatch.size} presistent messages")
+
     val futures = persistentBatch map { p =>
       import p._
       
       executePut(
-        rowKey(processorId, sequenceNr),
+        RowKey(processorId, sequenceNr).toBytes,
         Array(ProcessorId,          SequenceNr,          Marker,                  Message),
         Array(toBytes(processorId), toBytes(sequenceNr), toBytes(AcceptedMarker), persistentToBytes(p))
       )
@@ -60,40 +50,70 @@ class HBaseAsyncWriteJournal extends AsyncWriteJournal with HBaseJournalBase
     Future.sequence(futures)
   }
 
-  // todo most probably racy internally... fix me
   override def deleteAsync(processorId: String, fromSequenceNr: Long, toSequenceNr: Long, permanent: Boolean): Future[Unit] = {
-    val deleteCommand =
+    log.debug(s"Delete async for processorId:$processorId from sequenceNr $fromSequenceNr to $toSequenceNr, premanent: $permanent")
+
+    val doDelete =
       if (permanent) deleteRow _
       else markRowAsDeleted _
 
     val scanner = client.newScanner(TableBytes)
-    ???
-//    scanner.setStartKey()
-//    Future {
-//      scan(processorId, fromSequenceNr, toSequenceNr) { res =>
-//        val key = res.getRow
-//        deleteCommand(key)
-//      }
-//    } flatMap {
-//      Future.sequence(_)
-//    }
+    scanner.setStartKey(RowKey(processorId, fromSequenceNr).toBytes)
+    scanner.setStopKey(RowKey(processorId, toSequenceNr).toBytes)
+    scanner.setMaxNumRows(scanBatchSize)
+
+    def handleRows(in: ju.ArrayList[ju.ArrayList[KeyValue]]): Future[Unit] = in match {
+      case null =>
+        log.debug(s"Finished scanning (for processorId:$processorId from sequenceNr $fromSequenceNr to $toSequenceNr) in preparation for deletes.")
+        scanner.close()
+
+        Future.successful[Unit]()
+
+      case rows =>
+        println(s"got more rows... = ${rows.size}")
+
+        val keys = for {
+          row <- rows.asScala
+          col <- row.asScala
+        } yield col.key
+
+        // avoid deleting the same key in many commands
+        val fs = keys.toSet map doDelete
+
+        val all = Future.sequence(go() :: fs.toList)
+        all onComplete { all => println("completed all deletes!") }
+        all
+    }
+
+    def go() = scanner.nextRows() flatMap handleRows
+
+    go()
   }
 
   override def confirmAsync(processorId: String, sequenceNr: Long, channelId: String): Future[Unit] = {
+    log.debug(s"Confirming async for processorId: $processorId, sequenceNr: $sequenceNr and channelId: $channelId")
+
     executePut(
-      rowKey(processorId, sequenceNr),
+      RowKey(processorId, sequenceNr).toBytes,
       Array(Marker),
       Array(confirmedMarkerBytes(channelId))
     )
   }
 
-  private def deleteRow(key: Array[Byte]): Future[Unit] = {
+  protected def deleteRow(key: Array[Byte]): Future[Unit] = {
+    log.debug(s"Permanently deleting row: ${Bytes.toString(key)}")
+
     val p = Promise[Unit]()
     client.delete(new DeleteRequest(TableBytes, key))
       .addCallback(new Callback[AnyRef, AnyRef] {
       def call(arg: AnyRef) = p.complete(null)
     })
     p.future
+  }
+
+  protected def markRowAsDeleted(key: Array[Byte]): Future[Unit] = {
+    log.debug(s"Marking as deleted, for row: ${Bytes.toString(key)}")
+    executePut(key, Array(Marker), Array(DeletedMarkerBytes))
   }
 
   protected def executeDelete(key: Array[Byte]): Future[Unit] = {
@@ -106,9 +126,6 @@ class HBaseAsyncWriteJournal extends AsyncWriteJournal with HBaseJournalBase
     client.put(request)
   }
 
-  private def markRowAsDeleted(key: Array[Byte]): Future[Unit] =
-    executePut(key, Array(Marker), Array(DeletedMarkerBytes))
-
   /**
    * Scans the `.META.` collection in order to check how many regions a table has.
    * Faster than checking explicitly on the table.
@@ -118,14 +135,15 @@ class HBaseAsyncWriteJournal extends AsyncWriteJournal with HBaseJournalBase
     val start = System.currentTimeMillis()
 
     val scanner = client.newScanner(".META.")
+    scanner.setFamily("region")
     scanner.setQualifier("region:regioninfo")
     scanner.setKeyRegexp(s"""$tableName,.*""")
 
     val acc = new AtomicInteger(0)
     val sum = Promise[Int]()
 
-    scanner.nextRows().addCallback(new Callback[AnyRef, ju.ArrayList[ju.ArrayList[KeyValue]]] {
-      def call(arg: util.ArrayList[util.ArrayList[KeyValue]]): AnyRef = arg match {
+    val act = new Callback[AnyRef, ju.ArrayList[ju.ArrayList[KeyValue]]] {
+      def call(arg: ju.ArrayList[ju.ArrayList[KeyValue]]): AnyRef = arg match {
         case null =>
           scanner.close()
           sum.success(acc.get)
@@ -134,7 +152,8 @@ class HBaseAsyncWriteJournal extends AsyncWriteJournal with HBaseJournalBase
           acc addAndGet rows.size
           rows
       }
-    })
+    }
+    scanner.nextRows().addCallback(act)
 
     val f = sum.future
     f onComplete { n =>
@@ -146,7 +165,19 @@ class HBaseAsyncWriteJournal extends AsyncWriteJournal with HBaseJournalBase
   }
 
   override def postStop(): Unit = {
-    super.postStop()
     client.shutdown()
+    super.postStop()
+  }
+}
+
+object HBaseAsyncWriteJournal {
+  private var _zookeeperQuorum: String = _
+
+  /** based on the docs, there should always be only one instance, reused even if we had more tables */
+  private lazy val client = new AsyncBaseClient(_zookeeperQuorum)
+
+  def getClient(zookeeperQuorum: String) = {
+    _zookeeperQuorum = zookeeperQuorum
+    client
   }
 }

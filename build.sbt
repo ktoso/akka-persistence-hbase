@@ -11,14 +11,15 @@ libraryDependencies += "org.apache.hadoop" % "hadoop-core"   % "1.1.2"
 
 libraryDependencies += "org.apache.hadoop" % "hadoop-client" % "1.1.2"
 
-libraryDependencies += "org.apache.hbase"  % "hbase"         % "0.94.6.1"
+libraryDependencies += "org.apache.hbase"  % "hbase"         % "0.94.6.1" % "compile"
 
-libraryDependencies += "org.hbase"         % "asynchbase"    % "1.4.1"
+libraryDependencies += ("org.hbase"        % "asynchbase"    % "1.4.1")
+  .exclude("org.slf4j", "log4j-over-slf4j")
+  .exclude("org.slf4j", "jcl-over-slf4j")
 
-libraryDependencies +=  "com.jsuereth" %% "scala-arm" % "1.3"
+libraryDependencies += "org.slf4j"         % "slf4j-log4j12" % "1.6.0"
 
 libraryDependencies += "com.typesafe.akka" %% "akka-persistence-experimental" % "2.3-M2" % "compile"
-
 
 libraryDependencies += "com.typesafe.akka" %% "akka-testkit" % "2.3-M2" % "test"
 

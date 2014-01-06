@@ -8,11 +8,14 @@ trait DeferredConversions {
   implicit def typedFuture2unitFuture[T](f: Future[T]): Future[Unit] =
     f.asInstanceOf[Future[Unit]]
 
-  implicit def deferred2future(deferred: Deferred[AnyRef]): Future[Unit] = {
-    val p = Promise[Unit]()
+  implicit def deferred2unitFuture[T <: AnyRef](deferred: Deferred[AnyRef]): Future[Unit] =
+    deferred2future(deferred)
 
-    val onSuccess = new Callback[AnyRef, AnyRef]{
-      def call(in: AnyRef) = p.success(in)
+  implicit def deferred2future[T <: AnyRef](deferred: Deferred[T]): Future[T] = {
+    val p = Promise[T]()
+
+    val onSuccess = new Callback[AnyRef, T]{
+      def call(in: T) = p.success(in)
     }
 
     val onError = new Callback[Any, Exception]{
@@ -26,4 +29,8 @@ trait DeferredConversions {
     p.future
   }
 
+  implicit def fun2callback[T <: AnyRef, R <: AnyRef](fn: T => R): Callback[R, T] =
+    new Callback[R, T] {
+      def call(arg: T): R = fn(arg)
+    }
 }

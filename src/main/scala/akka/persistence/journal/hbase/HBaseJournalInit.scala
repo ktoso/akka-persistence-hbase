@@ -23,22 +23,26 @@ object HBaseJournalInit {
     val tableName = config.getString("table")
     val familyName = config.getString("family")
 
-    if (admin.tableExists(tableName)) {
-      val tableDesc = admin.getTableDescriptor(toBytes(tableName))
-      if (tableDesc.getFamily(toBytes(familyName)) == null) {
-        // target family does not exists, will add it.
-        admin.addColumn(familyName, new HColumnDescriptor(familyName))
-        true
+    try {
+      if (admin.tableExists(tableName)) {
+        val tableDesc = admin.getTableDescriptor(toBytes(tableName))
+        if (tableDesc.getFamily(toBytes(familyName)) == null) {
+          // target family does not exists, will add it.
+          admin.addColumn(familyName, new HColumnDescriptor(familyName))
+          true
+        } else {
+          // existing table is OK, no modifications run.
+          false
+        }
       } else {
-        // existing table is OK, no modifications run.
-        false
-      }
-    } else {
-      val tableDesc = new HTableDescriptor(toBytes(tableName))
-      tableDesc.addFamily(new HColumnDescriptor(familyName))
+        val tableDesc = new HTableDescriptor(toBytes(tableName))
+        tableDesc.addFamily(new HColumnDescriptor(familyName))
 
-      admin.createTable(tableDesc)
-      true
+        admin.createTable(tableDesc)
+        true
+      }
+    } finally {
+      admin.close()
     }
   }
 
