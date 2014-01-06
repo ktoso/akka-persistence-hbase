@@ -3,8 +3,6 @@ HBase Journal for Akka Persistence
 
 A replicated [Akka Persistence](http://doc.akka.io/docs/akka/2.3-M2/scala/persistence.html) journal backed by [Apache HBase](http://hbase.apache.org).
 
-**Warning:** As of writing, Akka persistence is marked **experimental** for akka `2.3-M2`. APIs might change, but I'll try to keep it up to date :-)
-
 Usage
 -----
 

@@ -63,7 +63,7 @@ class HBaseAsyncWriteJournal extends AsyncWriteJournal with HBaseJournalBase
     
     scanner.setStartKey(RowKey(processorId, fromSequenceNr).toBytes)
     scanner.setStopKey(RowKey(processorId, toSequenceNr).toBytes)
-    scanner.setMaxNumRows(scanBatchSize)
+    scanner.setMaxNumRows(journalConfig.scanBatchSize)
 
     def handleRows(in: ju.ArrayList[ju.ArrayList[KeyValue]]): Future[Unit] = in match {
       case null =>
@@ -119,8 +119,10 @@ class HBaseAsyncWriteJournal extends AsyncWriteJournal with HBaseJournalBase
   /**
    * Scans the `.META.` collection in order to check how many regions a table has.
    * Faster than checking explicitly on the table.
+   *
+   * Could be used to adjust our partition size if user gave us a range for example.
    */
-  def countRegions(tableName: String): Future[Int] = {
+  private def countRegions(tableName: String): Future[Int] = {
     log.info(s"Counting regions for table [$tableName]...")
     val start = System.currentTimeMillis()
 

@@ -9,17 +9,20 @@ import java.{util => ju}
 import scala.collection.mutable
 import org.apache.hadoop.hbase.util.Bytes
 
-trait HBaseAsyncReplay {
-  this: Actor with ActorLogging with HBaseJournalBase with PersistenceMarkers with DeferredConversions =>
-
-  def replayDispatcherId: String
-  private implicit lazy val replayDispatcher = context.system.dispatchers.lookup(replayDispatcherId)
+trait HBaseAsyncReplay extends DeferredConversions {
+  this: Actor with ActorLogging with HBaseJournalBase with PersistenceMarkers =>
 
   def client: HBaseClient
+
+  def journalConfig: HBaseJournalConfig
+
+  private lazy val replayDispatcherId = journalConfig.replayDispatcherId
+  private implicit lazy val replayDispatcher = context.system.dispatchers.lookup(replayDispatcherId)
 
   import Columns._
   import collection.JavaConverters._
 
+  // todo can be improved to to N parallel scans for each "partition" we created, instead of one "big scan"
   def replayAsync(processorId: String, fromSequenceNr: Long, toSequenceNr: Long)(replayCallback: (PersistentRepr) => Unit): Future[Long] = {
     log.debug(s"Async replay for processorId [$processorId], from sequenceNr: [$fromSequenceNr], to sequenceNr: [$toSequenceNr]")
 
@@ -29,7 +32,7 @@ trait HBaseAsyncReplay {
     scanner.setStopKey(RowKey(processorId, toSequenceNr).toBytes)
     scanner.setKeyRegexp(s""".*-$processorId-.*""")
 
-    scanner.setMaxNumRows(scanBatchSize)
+    scanner.setMaxNumRows(journalConfig.scanBatchSize)
 
     val callback = replay(replayCallback) _
 

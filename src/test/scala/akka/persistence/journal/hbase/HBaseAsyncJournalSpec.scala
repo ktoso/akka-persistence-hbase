@@ -7,7 +7,7 @@ import org.scalatest._
 import scala.concurrent.duration._
 import org.apache.hadoop.hbase.client.HBaseAdmin
 
-object HBaseJournalSpec {
+object HBaseAsyncJournalSpec {
 
   case class Delete(sequenceNr: Long, permanent: Boolean)
 
@@ -42,10 +42,10 @@ object HBaseJournalSpec {
   }
 }
 
-class HBaseJournalSpec extends TestKit(ActorSystem("test")) with ImplicitSender with FlatSpecLike
+class HBaseAsyncJournalSpec extends TestKit(ActorSystem("test")) with ImplicitSender with FlatSpecLike
   with Matchers with BeforeAndAfterAll {
 
-  import HBaseJournalSpec._
+  import HBaseAsyncJournalSpec._
 
   val config = system.settings.config.getConfig("hbase-journal")
 

@@ -14,27 +14,17 @@ trait HBaseJournalBase {
   val serialization = SerializationExtension(context.system)
 
   val config = context.system.settings.config.getConfig("hbase-journal")
+  val journalConfig = HBaseJournalConfig(config)
   val hadoopConfig = getHBaseConfig(config)
-
-  val scanBatchSize = config.getInt("scan-batch-size")
-
-  val replayDispatcherId = config.getString("replay-dispatcher")
-
-  /**
-   * Number of regions the used Table is partitioned to.
-   * '''MUST NOT change in the lifetime of this table.'''
-   *
-   * Should be a bigger number, for example 10 even if you currently have 2 regions, so you can split regions in the future.
-   */
-  val partitionCount: Int = config.getInt("partition.count")
 
   val Table = config.getString("table")
   val TableBytes = toBytes(Table)
 
   /** Used to avoid writing all data to the same region - see "hot region" problem */
-  def partition(sequenceNr: Long): Long = sequenceNr % partitionCount
+  def partition(sequenceNr: Long): Long = sequenceNr % journalConfig.partitionCount
 
-  @inline def padded(l: Long, howLong: Int) = String.valueOf(l).reverse.padTo(howLong, "0").reverse.mkString
+  @inline def padded(l: Long, howLong: Int) =
+    String.valueOf(l).reverse.padTo(howLong, "0").reverse.mkString
 
   case class RowKey(processorId: String, sequenceNr: Long) {
     val part = partition(sequenceNr)
