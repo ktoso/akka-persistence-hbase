@@ -29,10 +29,7 @@ class HBaseAsyncWriteJournal extends AsyncWriteJournal with HBaseJournalBase
   import Columns._
   import collection.JavaConverters._
 
-  val initTimeout = config.getInt("init.timeout").seconds
-  val zookeeperQuorum = config.getString("hbase.zookeeper.quorum")
-
-  val client = HBaseAsyncWriteJournal.getClient(zookeeperQuorum)
+  val client = HBaseAsyncWriteJournal.getClient(journalConfig.zookeeperQuorum)
 
   override def writeAsync(persistentBatch: Seq[PersistentRepr]): Future[Unit] = {
     log.debug(s"Write async for ${persistentBatch.size} presistent messages")

@@ -13,6 +13,7 @@ import com.typesafe.config.Config
  * @param replayDispatcherId dispatcher for fetching and replaying messages
  */
 case class HBaseJournalConfig(
+  zookeeperQuorum: String,
   table: String,
   family: String,
   partitionCount: Int,
@@ -23,6 +24,7 @@ case class HBaseJournalConfig(
 object HBaseJournalConfig {
   def apply(config: Config): HBaseJournalConfig = {
     HBaseJournalConfig(
+      zookeeperQuorum = config.getString("hbase.zookeeper.quorum"),
       table = config.getString("table"),
       family = config.getString("family"),
       partitionCount = config.getInt("partition.count"),

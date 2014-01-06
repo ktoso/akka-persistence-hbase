@@ -119,7 +119,7 @@ class HBaseAsyncJournalSpec extends TestKit(ActorSystem("test")) with ImplicitSe
     val processor2 = system.actorOf(Props(classOf[ProcessorB], "p4"))
     processor2 ! Persistent("b")
     awaitConfirmation(confirmProbe)
-    expectMsg("b-17")
+    expectMsg("b-8")
   }
 
 
@@ -137,7 +137,6 @@ class HBaseAsyncJournalSpec extends TestKit(ActorSystem("test")) with ImplicitSe
 
   override protected def afterAll() {
     val tableName = config.getString("table")
-    println("Starting shutdown...")
 
     val admin = new HBaseAdmin(HBaseJournalInit.getHBaseConfig(config))
     admin.disableTable(tableName)
