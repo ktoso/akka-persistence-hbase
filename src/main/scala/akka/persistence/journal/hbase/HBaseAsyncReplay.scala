@@ -72,8 +72,10 @@ trait HBaseAsyncReplay {
 
     val markerKeyValue = findColumn(Marker)
     val marker = Bytes.toString(markerKeyValue.value)
+
     marker match {
       case AcceptedMarker =>
+        replayCallback(msg)
 
       case DeletedMarker =>
         msg = msg.update(deleted = true)
@@ -81,9 +83,9 @@ trait HBaseAsyncReplay {
       case _ =>
         val channelId = extractSeqNrFromConfirmedMarker(marker)
         msg = msg.update(confirms = channelId +: msg.confirms)
+        replayCallback(msg)
     }
 
-    replayCallback(msg)
     msg.sequenceNr
   }
 

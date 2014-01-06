@@ -58,6 +58,9 @@ class HBaseAsyncWriteJournal extends AsyncWriteJournal with HBaseJournalBase
       else markRowAsDeleted _
 
     val scanner = client.newScanner(TableBytes)
+    scanner.setFamily(Family)
+    scanner.setQualifier(Marker)
+    
     scanner.setStartKey(RowKey(processorId, fromSequenceNr).toBytes)
     scanner.setStopKey(RowKey(processorId, toSequenceNr).toBytes)
     scanner.setMaxNumRows(scanBatchSize)
@@ -67,22 +70,15 @@ class HBaseAsyncWriteJournal extends AsyncWriteJournal with HBaseJournalBase
         log.debug(s"Finished scanning (for processorId:$processorId from sequenceNr $fromSequenceNr to $toSequenceNr) in preparation for deletes.")
         scanner.close()
 
-        Future.successful[Unit]()
+        Future.successful()
 
       case rows =>
-        println(s"got more rows... = ${rows.size}")
-
-        val keys = for {
+        val deletions = for {
           row <- rows.asScala
           col <- row.asScala
-        } yield col.key
+        } yield doDelete(col.key)
 
-        // avoid deleting the same key in many commands
-        val fs = keys.toSet map doDelete
-
-        val all = Future.sequence(go() :: fs.toList)
-        all onComplete { all => println("completed all deletes!") }
-        all
+        Future.sequence(go() :: deletions.toList)
     }
 
     def go() = scanner.nextRows() flatMap handleRows
@@ -102,13 +98,7 @@ class HBaseAsyncWriteJournal extends AsyncWriteJournal with HBaseJournalBase
 
   protected def deleteRow(key: Array[Byte]): Future[Unit] = {
     log.debug(s"Permanently deleting row: ${Bytes.toString(key)}")
-
-    val p = Promise[Unit]()
-    client.delete(new DeleteRequest(TableBytes, key))
-      .addCallback(new Callback[AnyRef, AnyRef] {
-      def call(arg: AnyRef) = p.complete(null)
-    })
-    p.future
+    executeDelete(key)
   }
 
   protected def markRowAsDeleted(key: Array[Byte]): Future[Unit] = {

@@ -15,7 +15,6 @@ object HBaseJournalSpec {
 
     def receive = {
       case Persistent(payload, sequenceNr) =>
-        println(s"actor[${self.path}}], payload = $payload, sequenceNr = $sequenceNr")
         sender ! payload
         sender ! sequenceNr
         sender ! recoveryRunning
@@ -30,18 +29,13 @@ object HBaseJournalSpec {
     val channel = context.actorOf(Channel.props("channel"))
 
     def receive = {
-      case p: Persistent =>
-        println("B got p send to: " + destination)
-        channel forward Deliver(p, destination)
-        Thread.sleep(200)
+      case p: Persistent => channel forward Deliver(p, destination)
     }
   }
 
   class Destination extends Actor {
     def receive = {
       case cp @ ConfirmablePersistent(payload, sequenceNr, _) =>
-        println(s"D got :actor[${self.path}}], payload = $payload, sequenceNr = $sequenceNr")
-
         sender ! s"$payload-$sequenceNr"
         cp.confirm()
     }
@@ -88,46 +82,44 @@ class HBaseJournalSpec extends TestKit(ActorSystem("test")) with ImplicitSender 
     expectMsgAllOf(max = 5.seconds, "a", 1L, false)
     expectMsgAllOf(max = 5.seconds, "b", 2L, false)
     processor1 ! Delete(1L, false)
+
     awaitDeletion(deleteProbe)
 
     system.actorOf(Props(classOf[ProcessorA], "p2"))
     expectMsgAllOf(max = 5.seconds, "b", 2L, true)
   }
 
-//  it should "not replay permanently deleted messages" in {
-//    val deleteProbe = TestProbe()
-//    subscribeToDeletion(deleteProbe)
-//
-//    val processor1 = system.actorOf(Props(classOf[ProcessorA], "p3"))
-//    processor1 ! Persistent("a")
-//    processor1 ! Persistent("b")
-//    expectMsgAllOf(max = 5.seconds, "a", 1L, false)
-//    expectMsgAllOf(max = 5.seconds, "b", 2L, false)
-//    processor1 ! Delete(1L, true)
-//    awaitDeletion(deleteProbe)
-//
-//    system.actorOf(Props(classOf[ProcessorA], "p3"))
-//    expectMsgAllOf("b", 2L, true)
-//  }
+  it should "not replay permanently deleted messages" in {
+    val deleteProbe = TestProbe()
+    subscribeToDeletion(deleteProbe)
+
+    val processor1 = system.actorOf(Props(classOf[ProcessorA], "p3"))
+    processor1 ! Persistent("a")
+    processor1 ! Persistent("b")
+    expectMsgAllOf(max = 5.seconds, "a", 1L, false)
+    expectMsgAllOf(max = 5.seconds, "b", 2L, false)
+    processor1 ! Delete(1L, true)
+    awaitDeletion(deleteProbe)
+
+    system.actorOf(Props(classOf[ProcessorA], "p3"))
+    expectMsgAllOf("b", 2L, true)
+  }
 
   it should "write delivery confirmations" in {
     val confirmProbe = TestProbe()
     subscribeToConfirmation(confirmProbe)
 
     val processor1 = system.actorOf(Props(classOf[ProcessorB], "p4"))
-    processor1 ! Persistent("a")
-    processor1 ! Persistent("b")
-    expectMsg(max = 5.seconds, "a-1")
-    expectMsg(max = 5.seconds, "b-2")
-
-    awaitConfirmation(confirmProbe)
-    awaitConfirmation(confirmProbe)
+    1L to 8L foreach { i =>
+      processor1 ! Persistent("a")
+      awaitConfirmation(confirmProbe)
+      expectMsg(s"a-$i")
+    }
 
     val processor2 = system.actorOf(Props(classOf[ProcessorB], "p4"))
-    processor2 ! Persistent("c")
-    expectMsg(max = 10.seconds, "a-1")
-    expectMsg(max = 10.seconds, "b-2")
-    expectMsg(max = 10.seconds, "c-3")
+    processor2 ! Persistent("b")
+    awaitConfirmation(confirmProbe)
+    expectMsg("b-17")
   }
 
 
