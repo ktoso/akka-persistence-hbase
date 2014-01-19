@@ -19,7 +19,7 @@ import scala.util.Success
  * Uses AsyncBase to implement asynchronous IPC with HBase.
  */
 class HBaseAsyncWriteJournal extends AsyncWriteJournal with HBaseJournalBase
-  with HBaseAsyncReplay with PersistenceMarkers
+  with HBaseAsyncRecovery with PersistenceMarkers
   with DeferredConversions
   with ActorLogging {
 

@@ -6,8 +6,8 @@ import akka.serialization.SerializationExtension
 import HBaseJournalInit._
 import akka.actor.{Actor, ActorLogging}
 
-trait HBaseJournalBase {
-  this: Actor with ActorLogging with HBaseAsyncReplay with PersistenceMarkers =>
+trait HBaseJournalBase extends HBaseAsyncRecovery {
+  this: Actor with ActorLogging with HBaseAsyncWriteJournal =>
 
   import Bytes._
 
@@ -29,6 +29,13 @@ trait HBaseJournalBase {
   case class RowKey(processorId: String, sequenceNr: Long) {
     val part = partition(sequenceNr)
     val toBytes = Bytes.toBytes(s"${padded(part, 3)}-$processorId-${padded(sequenceNr, 20)}")
+  }
+  object RowKey {
+    /**
+     * Since we're salting (prefixing) the entries with partition numbers,
+     * we must use this pattern for scanning for "all messages for processorX"
+     */
+    def patternForProcessor(processorId: String) = s""".*-$processorId-.*"""
   }
 
   object Columns {

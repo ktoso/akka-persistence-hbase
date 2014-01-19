@@ -61,30 +61,40 @@ trait HBaseAsyncRecovery extends AsyncRecovery with DeferredConversions {
     go()
   }
 
-
+  // todo make this multiple scans, on each partition instead of one big scan
   override def asyncReadHighestSequenceNr(processorId: String, fromSequenceNr: Long): Future[Long] = {
     log.debug(s"Async read for highest sequence number for processorId: [$processorId] (hint, seek from  nr: [$fromSequenceNr])")
 
     val scanner = newScanner()
     scanner.setStartKey(RowKey(processorId, fromSequenceNr).toBytes)
-    scanner.setKeyRegexp(s"""""")
+    scanner.setKeyRegexp(RowKey.patternForProcessor(processorId))
 
+    def handleRows(in: AnyRef): Future[Long] = in match {
+      case null =>
+        log.debug("read highest sequence number finished")
+        scanner.close()
+        Future(0)
+
+      case rows: JArrayList[JArrayList[KeyValue]] =>
+        log.debug(s"asyncReadHighestSequenceNr - got ${rows.size} rows...")
+        
+        val maxSoFar = rows.asScala.map(cols => sequenceNr(cols.asScala)).max
+          
+        go() map { reachedSeqNr =>
+          math.max(reachedSeqNr, maxSoFar)
+        }
+    }
+
+    def go() = scanner.nextRows() flatMap handleRows
+
+    go()
   }
 
   private def replay(replayCallback: (PersistentRepr) => Unit)(columns: mutable.Buffer[KeyValue]): Long = {
-    import Columns._
+    val messageKeyValue = findColumn(columns, Message)
+    var msg = persistentFromBytes(messageKeyValue.value)
 
-    def findColumn(qualifier: Array[Byte]) =
-      columns find { kv =>
-        ju.Arrays.equals(kv.qualifier, qualifier)
-      } getOrElse {
-        throw new RuntimeException(s"Unable to find [${Bytes.toString(qualifier)}}] field from: ${columns.map(kv => Bytes.toString(kv.qualifier))}")
-      }
-
-    val messageKetValue = findColumn(Message)
-    var msg = persistentFromBytes(messageKetValue.value)
-
-    val markerKeyValue = findColumn(Marker)
+    val markerKeyValue = findColumn(columns, Marker)
     val marker = Bytes.toString(markerKeyValue.value)
 
     marker match {
@@ -102,6 +112,20 @@ trait HBaseAsyncRecovery extends AsyncRecovery with DeferredConversions {
 
     msg.sequenceNr
   }
+  
+  private def sequenceNr(columns: mutable.Buffer[KeyValue]): Long = {
+    val messageKeyValue = findColumn(columns, Message)
+    val msg = persistentFromBytes(messageKeyValue.value)
+    msg.sequenceNr
+  }
+
+  import Columns._
+  private def findColumn(columns: mutable.Buffer[KeyValue], qualifier: Array[Byte]) =
+    columns find { kv =>
+      ju.Arrays.equals(kv.qualifier, qualifier)
+    } getOrElse {
+      throw new RuntimeException(s"Unable to find [${Bytes.toString(qualifier)}}] field from: ${columns.map(kv => Bytes.toString(kv.qualifier))}")
+    }
 
   private def newScanner() = {
     val scanner = client.newScanner(Table)
