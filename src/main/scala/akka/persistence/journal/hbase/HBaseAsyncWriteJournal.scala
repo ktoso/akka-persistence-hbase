@@ -2,7 +2,7 @@ package akka.persistence.journal.hbase
 
 import akka.persistence.journal.AsyncWriteJournal
 import scala.collection.immutable.Seq
-import akka.persistence.PersistentRepr
+import akka.persistence.{PersistentConfirmation, PersistentId, PersistentRepr}
 import scala.concurrent._
 import scala.concurrent.duration._
 import akka.actor.ActorLogging
@@ -12,13 +12,15 @@ import com.stumbleupon.async.Callback
 import java.{util => ju}
 import java.util.concurrent.atomic.AtomicInteger
 import scala.util.Success
+import scala.collection.immutable
+import java.util. { ArrayList => JArrayList }
 
 /**
  * Asyncronous HBase Journal.
  *
  * Uses AsyncBase to implement asynchronous IPC with HBase.
  */
-class HBaseAsyncWriteJournal extends AsyncWriteJournal with HBaseJournalBase
+class HBaseAsyncWriteJournal extends HBaseJournalBase with AsyncWriteJournal
   with HBaseAsyncRecovery with PersistenceMarkers
   with DeferredConversions
   with ActorLogging {
@@ -31,7 +33,9 @@ class HBaseAsyncWriteJournal extends AsyncWriteJournal with HBaseJournalBase
 
   val client = HBaseAsyncWriteJournal.getClient(journalConfig.zookeeperQuorum)
 
-  override def writeAsync(persistentBatch: Seq[PersistentRepr]): Future[Unit] = {
+  // journal plugin api impl
+
+  override def asyncWriteMessages(persistentBatch: immutable.Seq[PersistentRepr]): Future[Unit] = {
     log.debug(s"Write async for ${persistentBatch.size} presistent messages")
 
     val futures = persistentBatch map { p =>
@@ -47,35 +51,51 @@ class HBaseAsyncWriteJournal extends AsyncWriteJournal with HBaseJournalBase
     Future.sequence(futures)
   }
 
-  override def deleteAsync(processorId: String, fromSequenceNr: Long, toSequenceNr: Long, permanent: Boolean): Future[Unit] = {
-    log.debug(s"Delete async for processorId:$processorId from sequenceNr $fromSequenceNr to $toSequenceNr, premanent: $permanent")
+  override def asyncWriteConfirmations(confirmations: immutable.Seq[PersistentConfirmation]): Future[Unit] = {
+    log.debug(s"AsyncWriteConfirmations for ${confirmations.size} messages")
 
-    val doDelete =
-      if (permanent) deleteRow _
-      else markRowAsDeleted _
+    val fs = confirmations map { confirm =>
+      confirmAsync(confirm.processorId, confirm.sequenceNr, confirm.channelId)
+    }
 
-    val scanner = client.newScanner(TableBytes)
-    scanner.setFamily(Family)
-    scanner.setQualifier(Marker)
+    Future.sequence(fs)
+  }
+
+  override def asyncDeleteMessages(messageIds: immutable.Seq[PersistentId], permanent: Boolean): Future[Unit] = {
+    log.debug(s"Async delete [${messageIds.size}}] messages, premanent: $permanent")
+
+    val doDelete = deleteFunctionFor(permanent)
+
+    val deleteFutures = for {
+      messageId <- messageIds
+      rowId = RowKey(messageId.processorId, messageId.sequenceNr)
+    } yield doDelete(rowId.toBytes)
     
-    scanner.setStartKey(RowKey(processorId, fromSequenceNr).toBytes)
+    Future.sequence(deleteFutures)
+  }
+
+  override def asyncDeleteMessagesTo(processorId: String, toSequenceNr: Long, permanent: Boolean): Future[Unit] = {
+    log.debug(s"AsyncDeleteMessagesTo for processorId: $processorId to sequenceNr: $toSequenceNr, premanent: $permanent")
+    val doDelete = deleteFunctionFor(permanent)
+
+    val scanner = newScanner()
+    scanner.setStartKey(RowKey.firstForProcessor(processorId).toBytes)
     scanner.setStopKey(RowKey(processorId, toSequenceNr).toBytes)
-    scanner.setMaxNumRows(journalConfig.scanBatchSize)
+    scanner.setKeyRegexp(RowKey.patternForProcessor(processorId))
 
-    def handleRows(in: ju.ArrayList[ju.ArrayList[KeyValue]]): Future[Unit] = in match {
+    def handleRows(in: AnyRef): Future[Unit] = in match {
       case null =>
-        log.debug(s"Finished scanning (for processorId:$processorId from sequenceNr $fromSequenceNr to $toSequenceNr) in preparation for deletes.")
+        log.debug("AsyncDeleteMessagesTo finished scanning for keys")
         scanner.close()
+        Future(Array[Byte]())
 
-        Future.successful()
-
-      case rows =>
-        val deletions = for {
+      case rows: AsyncBaseRows  =>
+        val deletes = for {
           row <- rows.asScala
-          col <- row.asScala
+          col <- row.asScala.headOption // just one entry is enough, because is contains the key
         } yield doDelete(col.key)
 
-        Future.sequence(go() :: deletions.toList)
+        go() flatMap { _ => Future.sequence(deletes) }
     }
 
     def go() = scanner.nextRows() flatMap handleRows
@@ -83,15 +103,24 @@ class HBaseAsyncWriteJournal extends AsyncWriteJournal with HBaseJournalBase
     go()
   }
 
-  override def confirmAsync(processorId: String, sequenceNr: Long, channelId: String): Future[Unit] = {
-    log.debug(s"Confirming async for processorId: $processorId, sequenceNr: $sequenceNr and channelId: $channelId")
+  // end of journal plugin api impl
 
-    executePut(
-      RowKey(processorId, sequenceNr).toBytes,
-      Array(Marker),
-      Array(confirmedMarkerBytes(channelId))
-    )
+  def confirmAsync(processorId: String, sequenceNr: Long, channelId: String): Future[Unit] = {
+      log.debug(s"Confirming async for processorId: $processorId, sequenceNr: $sequenceNr and channelId: $channelId")
+
+      executePut(
+        RowKey(processorId, sequenceNr).toBytes,
+        Array(Marker),
+        Array(confirmedMarkerBytes(channelId))
+      )
+    }
+
+  private def deleteFunctionFor(permanent: Boolean): (Array[Byte]) => Future[Unit] = {
+    if (permanent) deleteRow
+    else markRowAsDeleted
   }
+
+  // execute ops
 
   protected def deleteRow(key: Array[Byte]): Future[Unit] = {
     log.debug(s"Permanently deleting row: ${Bytes.toString(key)}")
@@ -114,43 +143,22 @@ class HBaseAsyncWriteJournal extends AsyncWriteJournal with HBaseJournalBase
   }
 
   /**
-   * Scans the `.META.` collection in order to check how many regions a table has.
-   * Faster than checking explicitly on the table.
-   *
-   * Could be used to adjust our partition size if user gave us a range for example.
+   * Since we currently want to do one full-scan, we need to determine start/end keys.
+   * This must be done using [[akka.persistence.journal.hbase.HBaseJournalBase#RowKey]] as we're prefixing the key with a partition number.
    */
-  private def countRegions(tableName: String): Future[Int] = {
-    log.info(s"Counting regions for table [$tableName]...")
-    val start = System.currentTimeMillis()
-
-    val scanner = client.newScanner(".META.")
-    scanner.setFamily("region")
-    scanner.setQualifier("region:regioninfo")
-    scanner.setKeyRegexp(s"""$tableName,.*""")
-
-    val acc = new AtomicInteger(0)
-    val sum = Promise[Int]()
-
-    val act = new Callback[AnyRef, ju.ArrayList[ju.ArrayList[KeyValue]]] {
-      def call(arg: ju.ArrayList[ju.ArrayList[KeyValue]]): AnyRef = arg match {
-        case null =>
-          scanner.close()
-          sum.success(acc.get)
-
-        case rows =>
-          acc addAndGet rows.size
-          rows
-      }
+  private def findStartAndStopKeys(messageIds: immutable.Seq[PersistentId]): (RowKey, RowKey) = {
+    val msgs = messageIds.toVector.sortBy { id =>
+      RowKey(id.processorId, id.sequenceNr).toKeyString
     }
-    scanner.nextRows().addCallback(act)
+    val start = msgs.head
+    val end = msgs.last
+    RowKey(start.processorId, start.sequenceNr) -> RowKey(end.processorId, end.sequenceNr)
+  }
 
-    val f = sum.future
-    f onComplete { n =>
-      val stop = System.currentTimeMillis()
-      log.info(s"Finished counting regions for table [$tableName] (took ${stop - start} ms): [$n] regions")
-    }
-
-    f
+  private def newScanner() = {
+    val scanner = client.newScanner(Table)
+    scanner.setFamily(Family)
+    scanner
   }
 
   override def postStop(): Unit = {

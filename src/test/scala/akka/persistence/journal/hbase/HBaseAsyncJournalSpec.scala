@@ -29,7 +29,7 @@ object HBaseAsyncJournalSpec {
     val channel = context.actorOf(Channel.props("channel"))
 
     def receive = {
-      case p: Persistent => channel forward Deliver(p, destination)
+      case p: Persistent => channel forward Deliver(p, destination.path)
     }
   }
 
@@ -124,16 +124,16 @@ class HBaseAsyncJournalSpec extends TestKit(ActorSystem("test")) with ImplicitSe
 
 
   def subscribeToConfirmation(probe: TestProbe): Unit =
-    system.eventStream.subscribe(probe.ref, classOf[JournalProtocol.Confirm])
+    system.eventStream.subscribe(probe.ref, classOf[JournalProtocol.WriteConfirmations])
 
   def subscribeToDeletion(probe: TestProbe): Unit =
-    system.eventStream.subscribe(probe.ref, classOf[JournalProtocol.Delete])
+    system.eventStream.subscribe(probe.ref, classOf[JournalProtocol.DeleteMessages])
 
   def awaitConfirmation(probe: TestProbe): Unit =
-    probe.expectMsgType[JournalProtocol.Confirm](max = 10.seconds)
+    probe.expectMsgType[JournalProtocol.WriteConfirmationsSuccess](max = 10.seconds)
 
   def awaitDeletion(probe: TestProbe): Unit =
-    probe.expectMsgType[JournalProtocol.Delete](max = 10.seconds)
+    probe.expectMsgType[JournalProtocol.DeleteMessagesSuccess](max = 10.seconds)
 
   override protected def afterAll() {
     val tableName = config.getString("table")

@@ -4,11 +4,10 @@ import akka.persistence.PersistentRepr
 import akka.actor.{ActorLogging, Actor}
 import scala.concurrent.Future
 import org.hbase.async.{KeyValue, HBaseClient}
-import java.util. { ArrayList => JArrayList }
 import java.{util => ju}
 import scala.collection.mutable
 import org.apache.hadoop.hbase.util.Bytes
-import akka.persistence.journal.japi.AsyncRecovery
+import akka.persistence.journal.AsyncRecovery
 
 trait HBaseAsyncRecovery extends AsyncRecovery with DeferredConversions {
   this: Actor with ActorLogging with HBaseJournalBase with PersistenceMarkers =>
@@ -22,6 +21,8 @@ trait HBaseAsyncRecovery extends AsyncRecovery with DeferredConversions {
 
   import Columns._
   import collection.JavaConverters._
+
+  // async recovery plugin impl
 
   // todo can be improved to to N parallel scans for each "partition" we created, instead of one "big scan"
   override def asyncReplayMessages(processorId: String, fromSequenceNr: Long, toSequenceNr: Long, max: Long)
@@ -43,7 +44,7 @@ trait HBaseAsyncRecovery extends AsyncRecovery with DeferredConversions {
         scanner.close()
         Future(0)
 
-      case rows: JArrayList[JArrayList[KeyValue]] =>
+      case rows: AsyncBaseRows =>
         log.debug(s"replayAsync - got ${rows.size} rows...")
 
         val seqNrs = for {
@@ -71,12 +72,12 @@ trait HBaseAsyncRecovery extends AsyncRecovery with DeferredConversions {
 
     def handleRows(in: AnyRef): Future[Long] = in match {
       case null =>
-        log.debug("read highest sequence number finished")
+        log.debug("AsyncReadHighestSequenceNr finished")
         scanner.close()
         Future(0)
 
-      case rows: JArrayList[JArrayList[KeyValue]] =>
-        log.debug(s"asyncReadHighestSequenceNr - got ${rows.size} rows...")
+      case rows: AsyncBaseRows =>
+        log.debug(s"AsyncReadHighestSequenceNr - got ${rows.size} rows...")
         
         val maxSoFar = rows.asScala.map(cols => sequenceNr(cols.asScala)).max
           
@@ -112,20 +113,14 @@ trait HBaseAsyncRecovery extends AsyncRecovery with DeferredConversions {
 
     msg.sequenceNr
   }
-  
+
+  // end of async recovery plugin impl
+
   private def sequenceNr(columns: mutable.Buffer[KeyValue]): Long = {
     val messageKeyValue = findColumn(columns, Message)
     val msg = persistentFromBytes(messageKeyValue.value)
     msg.sequenceNr
   }
-
-  import Columns._
-  private def findColumn(columns: mutable.Buffer[KeyValue], qualifier: Array[Byte]) =
-    columns find { kv =>
-      ju.Arrays.equals(kv.qualifier, qualifier)
-    } getOrElse {
-      throw new RuntimeException(s"Unable to find [${Bytes.toString(qualifier)}}] field from: ${columns.map(kv => Bytes.toString(kv.qualifier))}")
-    }
 
   private def newScanner() = {
     val scanner = client.newScanner(Table)
