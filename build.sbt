@@ -8,6 +8,8 @@ scalaVersion := "2.10.2"
 
 val akkaVersion = "2.3-SNAPSHOT"
 
+resolvers += "akka snapshots" at "http://repo.akka.io/snapshots"
+
 libraryDependencies += "org.apache.hadoop" % "hadoop-core"   % "1.1.2"
 
 libraryDependencies += "org.apache.hadoop" % "hadoop-client" % "1.1.2"

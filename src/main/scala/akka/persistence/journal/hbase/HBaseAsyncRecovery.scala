@@ -8,9 +8,10 @@ import java.util. { ArrayList => JArrayList }
 import java.{util => ju}
 import scala.collection.mutable
 import org.apache.hadoop.hbase.util.Bytes
+import akka.persistence.journal.japi.AsyncRecovery
 
-trait HBaseAsyncReplay extends DeferredConversions {
-  this: Actor with ActorLogging with HBaseJournalBase with PersistenceMarkers =>
+trait HBaseAsyncRecovery extends DeferredConversions {
+  this: Actor with ActorLogging with AsyncRecovery with HBaseJournalBase with PersistenceMarkers =>
 
   def client: HBaseClient
 
@@ -23,14 +24,14 @@ trait HBaseAsyncReplay extends DeferredConversions {
   import collection.JavaConverters._
 
   // todo can be improved to to N parallel scans for each "partition" we created, instead of one "big scan"
-  def replayAsync(processorId: String, fromSequenceNr: Long, toSequenceNr: Long)(replayCallback: (PersistentRepr) => Unit): Future[Long] = {
+  override def asyncReplayMessages(processorId: String, fromSequenceNr: Long, toSequenceNr: Long, max: Long)
+                                  (replayCallback: PersistentRepr => Unit): Future[Unit] = {
     log.debug(s"Async replay for processorId [$processorId], from sequenceNr: [$fromSequenceNr], to sequenceNr: [$toSequenceNr]")
 
-    val scanner = client.newScanner(Table)
-    scanner.setFamily(Family)
+    val scanner = newScanner()
     scanner.setStartKey(RowKey(processorId, fromSequenceNr).toBytes)
     scanner.setStopKey(RowKey(processorId, toSequenceNr).toBytes)
-    scanner.setKeyRegexp(s""".*-$processorId-.*""")
+    scanner.setKeyRegexp(RowKey.patternForProcessor(processorId))
 
     scanner.setMaxNumRows(journalConfig.scanBatchSize)
 
@@ -58,6 +59,16 @@ trait HBaseAsyncReplay extends DeferredConversions {
     def go() = scanner.nextRows() flatMap handleRows
 
     go()
+  }
+
+
+  override def asyncReadHighestSequenceNr(processorId: String, fromSequenceNr: Long): Future[Long] = {
+    log.debug(s"Async read for highest sequence number for processorId: [$processorId] (hint, seek from  nr: [$fromSequenceNr])")
+
+    val scanner = newScanner()
+    scanner.setStartKey(RowKey(processorId, fromSequenceNr).toBytes)
+    scanner.setKeyRegexp(s"""""")
+
   }
 
   private def replay(replayCallback: (PersistentRepr) => Unit)(columns: mutable.Buffer[KeyValue]): Long = {
@@ -90,6 +101,12 @@ trait HBaseAsyncReplay extends DeferredConversions {
     }
 
     msg.sequenceNr
+  }
+
+  private def newScanner() = {
+    val scanner = client.newScanner(Table)
+    scanner.setFamily(Family)
+    scanner
   }
 
 }
