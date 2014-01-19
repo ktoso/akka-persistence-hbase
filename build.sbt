@@ -6,6 +6,7 @@ version := "0.3-SNAPSHOT"
 
 scalaVersion := "2.10.2"
 
+val akkaVersion = "2.3-SNAPSHOT"
 
 libraryDependencies += "org.apache.hadoop" % "hadoop-core"   % "1.1.2"
 
@@ -19,9 +20,9 @@ libraryDependencies += ("org.hbase"        % "asynchbase"    % "1.4.1")
 
 libraryDependencies += "org.slf4j"         % "slf4j-log4j12" % "1.6.0"
 
-libraryDependencies += "com.typesafe.akka" %% "akka-persistence-experimental" % "2.3-M2" % "compile"
+libraryDependencies += "com.typesafe.akka" %% "akka-persistence-experimental" % akkaVersion % "compile"
 
-libraryDependencies += "com.typesafe.akka" %% "akka-testkit" % "2.3-M2" % "test"
+libraryDependencies += "com.typesafe.akka" %% "akka-testkit" % akkaVersion % "test"
 
 libraryDependencies += "org.scalatest"     %% "scalatest"    % "2.0" % "test"
 
