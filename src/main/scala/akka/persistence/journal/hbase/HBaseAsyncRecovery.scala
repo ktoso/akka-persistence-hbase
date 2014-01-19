@@ -10,8 +10,8 @@ import scala.collection.mutable
 import org.apache.hadoop.hbase.util.Bytes
 import akka.persistence.journal.japi.AsyncRecovery
 
-trait HBaseAsyncRecovery extends DeferredConversions {
-  this: Actor with ActorLogging with AsyncRecovery with HBaseJournalBase with PersistenceMarkers =>
+trait HBaseAsyncRecovery extends AsyncRecovery with DeferredConversions {
+  this: Actor with ActorLogging with HBaseJournalBase with PersistenceMarkers =>
 
   def client: HBaseClient
 
@@ -52,7 +52,7 @@ trait HBaseAsyncRecovery extends DeferredConversions {
         } yield callback(cols)
 
         go() map { reachedSeqNr =>
-          (reachedSeqNr :: seqNrs.toList).max
+          math.max(reachedSeqNr, seqNrs.max)
         }
     }
 
