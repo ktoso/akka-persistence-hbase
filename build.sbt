@@ -29,6 +29,8 @@ libraryDependencies += "com.typesafe.akka" %% "akka-testkit" % akkaVersion % "te
 libraryDependencies += "org.scalatest"     %% "scalatest"    % "2.0" % "test"
 
 
+parallelExecution in Test := false
+
 // publishing settings
 
 publishMavenStyle := true

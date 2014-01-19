@@ -2,3 +2,4 @@
 *.log
 *.iml
 target/
+src/test/resources/application.conf

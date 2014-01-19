@@ -2,7 +2,7 @@ package akka.persistence.journal.hbase
 
 import akka.persistence._
 import org.apache.hadoop.hbase.util.Bytes
-import akka.serialization.SerializationExtension
+import akka.serialization.{Serialization, SerializationExtension}
 import HBaseJournalInit._
 import akka.actor.{Actor, ActorLogging}
 import org.hbase.async.KeyValue
@@ -10,8 +10,8 @@ import java.util. { ArrayList => JArrayList }
 import scala.collection.mutable
 import java.{ util => ju }
 
-trait HBaseJournalBase extends HBaseAsyncRecovery {
-  this: Actor with ActorLogging with HBaseAsyncWriteJournal =>
+trait HBaseJournalBase {
+  this: Actor with ActorLogging with HBaseAsyncRecovery =>
 
   import Bytes._
 
