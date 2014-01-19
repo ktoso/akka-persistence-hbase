@@ -2,7 +2,7 @@ package akka.persistence.journal.hbase
 
 import akka.persistence.journal.AsyncWriteJournal
 import scala.collection.immutable.Seq
-import akka.persistence.{PersistentConfirmation, PersistentId, PersistentRepr}
+import akka.persistence.{Persistent, PersistentConfirmation, PersistentId, PersistentRepr}
 import scala.concurrent._
 import scala.concurrent.duration._
 import akka.actor.ActorLogging
@@ -12,8 +12,10 @@ import com.stumbleupon.async.Callback
 import java.{util => ju}
 import java.util.concurrent.atomic.AtomicInteger
 import scala.util.Success
-import scala.collection.immutable
+import scala.collection.{mutable, immutable}
 import java.util. { ArrayList => JArrayList }
+import akka.persistence.journal.hbase.HBaseJournalInit._
+import akka.serialization.SerializationExtension
 
 /**
  * Asyncronous HBase Journal.
@@ -24,6 +26,10 @@ class HBaseAsyncWriteJournal extends HBaseJournalBase with AsyncWriteJournal
   with HBaseAsyncRecovery with PersistenceMarkers
   with DeferredConversions
   with ActorLogging {
+
+  val serialization = SerializationExtension(context.system)
+
+  val config = context.system.settings.config.getConfig("hbase-journal")
 
   import context.dispatcher
 
@@ -62,7 +68,7 @@ class HBaseAsyncWriteJournal extends HBaseJournalBase with AsyncWriteJournal
   }
 
   override def asyncDeleteMessages(messageIds: immutable.Seq[PersistentId], permanent: Boolean): Future[Unit] = {
-    log.debug(s"Async delete [${messageIds.size}}] messages, premanent: $permanent")
+    log.debug(s"Async delete [${messageIds.size}] messages, premanent: $permanent")
 
     val doDelete = deleteFunctionFor(permanent)
 

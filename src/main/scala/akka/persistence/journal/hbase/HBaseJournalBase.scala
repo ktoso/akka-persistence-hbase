@@ -2,27 +2,29 @@ package akka.persistence.journal.hbase
 
 import akka.persistence._
 import org.apache.hadoop.hbase.util.Bytes
-import akka.serialization.{Serialization, SerializationExtension}
+import akka.serialization.Serialization
 import HBaseJournalInit._
 import akka.actor.{Actor, ActorLogging}
 import org.hbase.async.KeyValue
 import java.util. { ArrayList => JArrayList }
 import scala.collection.mutable
 import java.{ util => ju }
+import com.typesafe.config.Config
+import org.apache.hadoop.hbase.util.Bytes._
 
 trait HBaseJournalBase {
   this: Actor with ActorLogging with HBaseAsyncRecovery =>
 
-  import Bytes._
+  def serialization: Serialization
 
-  val serialization = SerializationExtension(context.system)
+  /** hbase-journal configuration */
+  def config: Config
 
-  val config = context.system.settings.config.getConfig("hbase-journal")
-  val journalConfig = HBaseJournalConfig(config)
-  val hadoopConfig = getHBaseConfig(config)
+  lazy val journalConfig = HBaseJournalConfig(config)
+  lazy val hadoopConfig = getHBaseConfig(config)
 
-  val Table = config.getString("table")
-  val TableBytes = toBytes(Table)
+  lazy val Table = config.getString("table")
+  lazy val TableBytes = toBytes(Table)
 
   type AsyncBaseRows = JArrayList[JArrayList[KeyValue]]
 
@@ -43,7 +45,7 @@ trait HBaseJournalBase {
      * we must use this pattern for scanning for "all messages for processorX"
      */
     def patternForProcessor(processorId: String) = s""".*-$processorId-.*"""
-    
+
     /** First key possible, similar to: `0-id-000000000000000000000`*/
     def firstForProcessor(processorId: String) =
       RowKey(processorId, 0)

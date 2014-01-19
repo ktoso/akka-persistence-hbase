@@ -10,7 +10,7 @@ import org.apache.hadoop.hbase.util.Bytes
 import akka.persistence.journal.AsyncRecovery
 
 trait HBaseAsyncRecovery extends AsyncRecovery with DeferredConversions {
-  this: Actor with ActorLogging with HBaseJournalBase with PersistenceMarkers =>
+  this: Actor with ActorLogging with HBaseAsyncWriteJournal with PersistenceMarkers =>
 
   def client: HBaseClient
 
@@ -42,7 +42,7 @@ trait HBaseAsyncRecovery extends AsyncRecovery with DeferredConversions {
       case null =>
         log.debug("replayAsync - finished!")
         scanner.close()
-        Future(0)
+        Future(0L)
 
       case rows: AsyncBaseRows =>
         log.debug(s"replayAsync - got ${rows.size} rows...")

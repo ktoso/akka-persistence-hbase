@@ -1,14 +1,14 @@
 package akka.persistence.journal.hbase
 
 import com.stumbleupon.async._
-import scala.concurrent.{Promise, Future}
+import scala.concurrent.{ExecutionContext, Promise, Future}
 
 trait DeferredConversions {
 
-  implicit def typedFuture2unitFuture[T](f: Future[T]): Future[Unit] =
-    f.asInstanceOf[Future[Unit]]
+  implicit def typedFuture2unitFuture[T](f: Future[T])(implicit executionContext: ExecutionContext): Future[Unit] =
+    f map { _ => () }
 
-  implicit def deferred2unitFuture[T <: AnyRef](deferred: Deferred[AnyRef]): Future[Unit] =
+  implicit def deferred2unitFuture[T <: AnyRef](deferred: Deferred[AnyRef])(implicit executionContext: ExecutionContext): Future[Unit] =
     deferred2future(deferred)
 
   implicit def deferred2future[T <: AnyRef](deferred: Deferred[T]): Future[T] = {

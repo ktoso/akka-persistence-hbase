@@ -130,10 +130,10 @@ class HBaseAsyncJournalSpec extends TestKit(ActorSystem("test")) with ImplicitSe
     system.eventStream.subscribe(probe.ref, classOf[JournalProtocol.DeleteMessages])
 
   def awaitConfirmation(probe: TestProbe): Unit =
-    probe.expectMsgType[JournalProtocol.WriteConfirmationsSuccess](max = 10.seconds)
+    probe.expectMsgType[JournalProtocol.WriteConfirmations](max = 10.seconds)
 
   def awaitDeletion(probe: TestProbe): Unit =
-    probe.expectMsgType[JournalProtocol.DeleteMessagesSuccess](max = 10.seconds)
+    probe.expectMsgType[JournalProtocol.DeleteMessages](max = 10.seconds)
 
   override protected def afterAll() {
     val tableName = config.getString("table")
