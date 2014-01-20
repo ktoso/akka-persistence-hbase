@@ -119,18 +119,20 @@ class HBaseAsyncJournalSpec extends TestKit(ActorSystem("test")) with ImplicitSe
     val processor2 = system.actorOf(Props(classOf[ProcessorB], "p4"))
     processor2 ! Persistent("b")
     awaitConfirmation(confirmProbe)
-    expectMsg("b-8")
+    expectMsg("b-9")
   }
 
 
   def subscribeToConfirmation(probe: TestProbe): Unit =
-    system.eventStream.subscribe(probe.ref, classOf[JournalProtocol.WriteConfirmations])
-
-  def subscribeToDeletion(probe: TestProbe): Unit =
-    system.eventStream.subscribe(probe.ref, classOf[JournalProtocol.DeleteMessages])
+//    system.eventStream.subscribe(probe.ref, classOf[JournalProtocol.WriteConfirmationsSuccess])
+    system.eventStream.subscribe(probe.ref, classOf[DeliveredByChannel])
 
   def awaitConfirmation(probe: TestProbe): Unit =
-    probe.expectMsgType[JournalProtocol.WriteConfirmations](max = 10.seconds)
+//    probe.expectMsgType[JournalProtocol.WriteConfirmationsSuccess](max = 10.seconds)
+    probe.expectMsgType[DeliveredByChannel](max = 10.seconds)
+
+  def subscribeToDeletion(probe: TestProbe): Unit =
+      system.eventStream.subscribe(probe.ref, classOf[JournalProtocol.DeleteMessages])
 
   def awaitDeletion(probe: TestProbe): Unit =
     probe.expectMsgType[JournalProtocol.DeleteMessages](max = 10.seconds)
