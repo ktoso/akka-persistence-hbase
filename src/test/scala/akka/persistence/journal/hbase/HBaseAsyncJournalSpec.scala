@@ -124,11 +124,9 @@ class HBaseAsyncJournalSpec extends TestKit(ActorSystem("test")) with ImplicitSe
 
 
   def subscribeToConfirmation(probe: TestProbe): Unit =
-//    system.eventStream.subscribe(probe.ref, classOf[JournalProtocol.WriteConfirmationsSuccess])
     system.eventStream.subscribe(probe.ref, classOf[DeliveredByChannel])
 
   def awaitConfirmation(probe: TestProbe): Unit =
-//    probe.expectMsgType[JournalProtocol.WriteConfirmationsSuccess](max = 10.seconds)
     probe.expectMsgType[DeliveredByChannel](max = 10.seconds)
 
   def subscribeToDeletion(probe: TestProbe): Unit =
