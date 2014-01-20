@@ -27,10 +27,13 @@ class HBaseAsyncWriteJournal extends HBaseJournalBase with AsyncWriteJournal
   with DeferredConversions
   with ActorLogging {
 
+  import HBaseAsyncWriteJournal._
+
   val serialization = SerializationExtension(context.system)
 
   val config = context.system.settings.config.getConfig("hbase-journal")
 
+  val publish = journalConfig.publishTestingEvents
   import context.dispatcher
 
   import Bytes._
@@ -53,8 +56,10 @@ class HBaseAsyncWriteJournal extends HBaseJournalBase with AsyncWriteJournal
         Array(toBytes(processorId), toBytes(sequenceNr), toBytes(AcceptedMarker), persistentToBytes(p))
       )
     }
-    
-    Future.sequence(futures)
+
+    val f = Future.sequence(futures)
+    if (publish) f map { _ => context.system.eventStream.publish(Finished(persistentBatch.size)) }
+    f
   }
 
   override def asyncWriteConfirmations(confirmations: immutable.Seq[PersistentConfirmation]): Future[Unit] = {
@@ -148,19 +153,6 @@ class HBaseAsyncWriteJournal extends HBaseJournalBase with AsyncWriteJournal
     client.put(request)
   }
 
-  /**
-   * Since we currently want to do one full-scan, we need to determine start/end keys.
-   * This must be done using [[akka.persistence.journal.hbase.HBaseJournalBase#RowKey]] as we're prefixing the key with a partition number.
-   */
-  private def findStartAndStopKeys(messageIds: immutable.Seq[PersistentId]): (RowKey, RowKey) = {
-    val msgs = messageIds.toVector.sortBy { id =>
-      RowKey(id.processorId, id.sequenceNr).toKeyString
-    }
-    val start = msgs.head
-    val end = msgs.last
-    RowKey(start.processorId, start.sequenceNr) -> RowKey(end.processorId, end.sequenceNr)
-  }
-
   private def newScanner() = {
     val scanner = client.newScanner(Table)
     scanner.setFamily(Family)
@@ -174,6 +166,9 @@ class HBaseAsyncWriteJournal extends HBaseJournalBase with AsyncWriteJournal
 }
 
 object HBaseAsyncWriteJournal {
+
+  case class Finished(written: Int)
+
   private var _zookeeperQuorum: String = _
 
   /** based on the docs, there should always be only one instance, reused even if we had more tables */

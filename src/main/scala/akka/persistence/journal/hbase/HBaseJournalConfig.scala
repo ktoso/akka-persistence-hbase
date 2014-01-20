@@ -19,7 +19,8 @@ case class HBaseJournalConfig(
   flushInterval: Short,
   partitionCount: Int,
   scanBatchSize: Int,
-  replayDispatcherId: String
+  replayDispatcherId: String,
+  publishTestingEvents: Boolean
 )
 
 object HBaseJournalConfig {
@@ -31,7 +32,8 @@ object HBaseJournalConfig {
       flushInterval = config.getInt("flush-interval").toShort,
       partitionCount = config.getInt("partition.count"),
       scanBatchSize = config.getInt("scan-batch-size"),
-      replayDispatcherId = config.getString("replay-dispatcher")
+      replayDispatcherId = config.getString("replay-dispatcher"),
+      publishTestingEvents = config.getBoolean("publish-testing-events")
     )
   }
 }
