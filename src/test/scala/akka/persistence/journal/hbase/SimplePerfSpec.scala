@@ -15,7 +15,6 @@ object SimplePerfSpec {
 
     def receive = {
       case Persistent(payload, sequenceNr) =>
-        print(s"$sequenceNr|")
 
       case Persistent(payload, Until) =>
         sender ! Finished(Until)

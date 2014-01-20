@@ -37,7 +37,7 @@ class HBaseAsyncWriteJournal extends HBaseJournalBase with AsyncWriteJournal
   import Columns._
   import collection.JavaConverters._
 
-  val client = HBaseAsyncWriteJournal.getClient(journalConfig.zookeeperQuorum)
+  val client = HBaseAsyncWriteJournal.getClient(journalConfig)
 
   // journal plugin api impl
 
@@ -179,8 +179,9 @@ object HBaseAsyncWriteJournal {
   /** based on the docs, there should always be only one instance, reused even if we had more tables */
   private lazy val client = new AsyncBaseClient(_zookeeperQuorum)
 
-  def getClient(zookeeperQuorum: String) = {
-    _zookeeperQuorum = zookeeperQuorum
+  def getClient(config: HBaseJournalConfig) = {
+    _zookeeperQuorum = config.zookeeperQuorum
+    client.setFlushInterval(config.flushInterval)
     client
   }
 }

@@ -16,6 +16,7 @@ case class HBaseJournalConfig(
   zookeeperQuorum: String,
   table: String,
   family: String,
+  flushInterval: Short,
   partitionCount: Int,
   scanBatchSize: Int,
   replayDispatcherId: String
@@ -27,6 +28,7 @@ object HBaseJournalConfig {
       zookeeperQuorum = config.getString("hbase.zookeeper.quorum"),
       table = config.getString("table"),
       family = config.getString("family"),
+      flushInterval = config.getInt("flush-interval").toShort,
       partitionCount = config.getInt("partition.count"),
       scanBatchSize = config.getInt("scan-batch-size"),
       replayDispatcherId = config.getString("replay-dispatcher")
