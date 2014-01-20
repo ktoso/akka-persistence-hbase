@@ -1,7 +1,7 @@
 HBase Journal for Akka Persistence
 ==================================
 
-A replicated _fully asynchronous_ [Akka Persistence](http://doc.akka.io/docs/akka/2.3-SNAPSHOT/scala/persistence.html) journal backed by [Apache HBase](http://hbase.apache.org).
+A replicated _fully asynchronous_ [Akka Persistence](http://doc.akka.io/docs/akka/snapshot/scala/persistence.html) journal backed by [Apache HBase](http://hbase.apache.org).
 
 Usage
 -----
