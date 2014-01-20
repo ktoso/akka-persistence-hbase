@@ -1,7 +1,7 @@
 HBase Journal for Akka Persistence
 ==================================
 
-A replicated _fully asynchronous_ [Akka Persistence](http://doc.akka.io/docs/akka/2.3-M2/scala/persistence.html) journal backed by [Apache HBase](http://hbase.apache.org).
+A replicated _fully asynchronous_ [Akka Persistence](http://doc.akka.io/docs/akka/2.3-SNAPSHOT/scala/persistence.html) journal backed by [Apache HBase](http://hbase.apache.org).
 
 Usage
 -----
@@ -9,9 +9,12 @@ Usage
 The artifact is published to Maven Central, so in order to use it you just have to add the following dependency:
 
     // build.sbt style:
-    libraryDependencies += "pl.project13.scala" %% "akka-persistence-hbase" % "0.2"
+    libraryDependencies += "pl.project13.scala" %% "akka-persistence-hbase" % "0.3"
 
-This brings in the fully **async** version, if however for some reason you want a synchronous journal, it's implemented in version `0.1`.
+Since `0.2` this library is fully **async**. Version `0.2` is compatible with Akka `2.3-M2`, the akka-persistence API has since then **changed**!
+
+Please note that only versions `0.3+` are compatible with the latests Akka version (`2.3-SNAPSHOT`, today is: 20 Jan 2013).
+This version of the API should be stable though, so go ahead and give it a spin!
 
 Configuration
 -------------
