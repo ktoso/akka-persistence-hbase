@@ -12,9 +12,9 @@ import akka.persistence.journal.AsyncRecovery
 trait HBaseAsyncRecovery extends AsyncRecovery with DeferredConversions {
   this: Actor with ActorLogging with HBaseAsyncWriteJournal with PersistenceMarkers =>
 
-  def client: HBaseClient
+  private[persistence] def client: HBaseClient
 
-  def journalConfig: HBaseJournalConfig
+  private[persistence] def journalConfig: HBaseJournalConfig
 
   private lazy val replayDispatcherId = journalConfig.replayDispatcherId
   private implicit lazy val replayDispatcher = context.system.dispatchers.lookup(replayDispatcherId)

@@ -1,20 +1,12 @@
 package akka.persistence.journal.hbase
 
 import akka.persistence.journal.AsyncWriteJournal
-import scala.collection.immutable.Seq
-import akka.persistence.{Persistent, PersistentConfirmation, PersistentId, PersistentRepr}
+import akka.persistence.{PersistenceSettings, PersistentConfirmation, PersistentId, PersistentRepr}
 import scala.concurrent._
-import scala.concurrent.duration._
 import akka.actor.ActorLogging
-import org.hbase.async.{HBaseClient => AsyncBaseClient, KeyValue, DeleteRequest, PutRequest}
+import org.hbase.async.{HBaseClient => AsyncBaseClient, DeleteRequest, PutRequest}
 import org.apache.hadoop.hbase.util.Bytes
-import com.stumbleupon.async.Callback
-import java.{util => ju}
-import java.util.concurrent.atomic.AtomicInteger
-import scala.util.Success
-import scala.collection.{mutable, immutable}
-import java.util. { ArrayList => JArrayList }
-import akka.persistence.journal.hbase.HBaseJournalInit._
+import scala.collection.immutable
 import akka.serialization.SerializationExtension
 
 /**
@@ -29,20 +21,23 @@ class HBaseAsyncWriteJournal extends HBaseJournalBase with AsyncWriteJournal
 
   import HBaseAsyncWriteJournal._
 
-  val serialization = SerializationExtension(context.system)
+  override val serialization = SerializationExtension(context.system)
 
-  val config = context.system.settings.config.getConfig("hbase-journal")
+  override val config = context.system.settings.config.getConfig("hbase-journal")
+  
+  private val persistenceSettings = new PersistenceSettings(context.system.settings.config.getConfig("akka.persistence"))
 
-  val publish = journalConfig.publishTestingEvents
+  private val publish = journalConfig.publishTestingEvents
+
   import context.dispatcher
 
   import Bytes._
   import Columns._
   import collection.JavaConverters._
 
-  val client = HBaseAsyncWriteJournal.getClient(journalConfig)
-
-  // journal plugin api impl
+  override val client = HBaseAsyncWriteJournal.getClient(journalConfig, persistenceSettings)
+  
+  // journal plugin api impl -------------------------------------------------------------------------------------------
 
   override def asyncWriteMessages(persistentBatch: immutable.Seq[PersistentRepr]): Future[Unit] = {
     log.debug(s"Write async for ${persistentBatch.size} presistent messages")
@@ -57,6 +52,7 @@ class HBaseAsyncWriteJournal extends HBaseJournalBase with AsyncWriteJournal
       )
     }
 
+    flushWrites()
     val f = Future.sequence(futures)
     if (publish) f map { _ => context.system.eventStream.publish(Finished(persistentBatch.size)) }
     f
@@ -69,6 +65,7 @@ class HBaseAsyncWriteJournal extends HBaseJournalBase with AsyncWriteJournal
       confirmAsync(confirm.processorId, confirm.sequenceNr, confirm.channelId)
     }
 
+    flushWrites()
     Future.sequence(fs)
   }
 
@@ -81,7 +78,8 @@ class HBaseAsyncWriteJournal extends HBaseJournalBase with AsyncWriteJournal
       messageId <- messageIds
       rowId = RowKey(messageId.processorId, messageId.sequenceNr)
     } yield doDelete(rowId.toBytes)
-    
+
+    flushWrites()
     Future.sequence(deleteFutures)
   }
 
@@ -97,6 +95,7 @@ class HBaseAsyncWriteJournal extends HBaseJournalBase with AsyncWriteJournal
     def handleRows(in: AnyRef): Future[Unit] = in match {
       case null =>
         log.debug("AsyncDeleteMessagesTo finished scanning for keys")
+        flushWrites()
         scanner.close()
         Future(Array[Byte]())
 
@@ -110,11 +109,11 @@ class HBaseAsyncWriteJournal extends HBaseJournalBase with AsyncWriteJournal
     }
 
     def go() = scanner.nextRows() flatMap handleRows
-
+    
     go()
   }
 
-  // end of journal plugin api impl
+  // end of journal plugin api impl ------------------------------------------------------------------------------------
 
   def confirmAsync(processorId: String, sequenceNr: Long, channelId: String): Future[Unit] = {
       log.debug(s"Confirming async for processorId: $processorId, sequenceNr: $sequenceNr and channelId: $channelId")
@@ -153,6 +152,13 @@ class HBaseAsyncWriteJournal extends HBaseJournalBase with AsyncWriteJournal
     client.put(request)
   }
 
+  /**
+   * Sends the buffered commands to HBase. Does not guarantee that they "complete" right away.
+   */
+  def flushWrites() {
+    client.flush()
+  }
+
   private def newScanner() = {
     val scanner = client.newScanner(Table)
     scanner.setFamily(Family)
@@ -174,9 +180,19 @@ object HBaseAsyncWriteJournal {
   /** based on the docs, there should always be only one instance, reused even if we had more tables */
   private lazy val client = new AsyncBaseClient(_zookeeperQuorum)
 
-  def getClient(config: HBaseJournalConfig) = {
+  def getClient(config: HBaseJournalConfig, persistenceSettings: PersistenceSettings) = {
     _zookeeperQuorum = config.zookeeperQuorum
-    client.setFlushInterval(config.flushInterval)
+
+    // since we will be forcing a flush anyway after each batch, let's not make asyncbase flush more than it needs to.
+    // for example, we tell akka "200", but asyncbase was set to "20", so it would flush way more often than we'd expect it to.
+    // by setting the internal flushing to max(...), we're manually in hold of doing the flushing at the rigth moment.
+    val maxBatchSize = List(
+      persistenceSettings.journal.maxMessageBatchSize,
+      persistenceSettings.journal.maxConfirmationBatchSize,
+      persistenceSettings.journal.maxDeletionBatchSize
+    ).max.toShort
+
+    client.setFlushInterval(maxBatchSize)
     client
   }
 }
