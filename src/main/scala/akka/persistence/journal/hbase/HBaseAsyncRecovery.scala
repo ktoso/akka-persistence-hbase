@@ -8,6 +8,7 @@ import java.{util => ju}
 import scala.collection.mutable
 import org.apache.hadoop.hbase.util.Bytes
 import akka.persistence.journal.AsyncRecovery
+import akka.persistence.journal.hbase.util.DeferredConversions
 
 trait HBaseAsyncRecovery extends AsyncRecovery with DeferredConversions {
   this: Actor with ActorLogging with HBaseAsyncWriteJournal with PersistenceMarkers =>

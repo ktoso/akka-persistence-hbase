@@ -1,4 +1,4 @@
-package akka.persistence.journal.hbase
+package akka.persistence.snapshot.hbase
 
 import akka.persistence.snapshot.SnapshotStore
 import akka.persistence.{SnapshotMetadata, SelectedSnapshot, SnapshotSelectionCriteria}

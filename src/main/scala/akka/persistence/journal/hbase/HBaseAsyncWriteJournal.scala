@@ -8,6 +8,7 @@ import org.hbase.async.{HBaseClient => AsyncBaseClient, DeleteRequest, PutReques
 import org.apache.hadoop.hbase.util.Bytes
 import scala.collection.immutable
 import akka.serialization.SerializationExtension
+import akka.persistence.journal.hbase.util.DeferredConversions
 
 /**
  * Asyncronous HBase Journal.
