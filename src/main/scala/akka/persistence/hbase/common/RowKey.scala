@@ -1,15 +1,21 @@
 package akka.contrib.persistence.hbase.common
 
 import org.apache.hadoop.hbase.util.Bytes
+import akka.contrib.persistence.hbase.journal.HBaseJournalConfig
 
 case class RowKey(processorId: String, sequenceNr: Long) {
-  val part = partition(sequenceNr)
+
+  def part = partition(sequenceNr)
   val toBytes = Bytes.toBytes(toKeyString)
 
   def toKeyString = s"${padded(part, 3)}-$processorId-${padded(sequenceNr, 20)}"
 
+  @inline def padded(l: Long, howLong: Int) =
+    String.valueOf(l).reverse.padTo(howLong, "0").reverse.mkString
+
   /** Used to avoid writing all data to the same region - see "hot region" problem */
-  private def partition(sequenceNr: Long): Long = sequenceNr % journalConfig.partitionCount
+  private def partition(sequenceNr: Long)(implicit journalConfig: HBaseJournalConfig): Long =
+    sequenceNr % journalConfig.partitionCount
 }
 
 object RowKey {

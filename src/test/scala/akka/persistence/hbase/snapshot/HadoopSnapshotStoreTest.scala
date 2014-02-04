@@ -1,11 +1,11 @@
-package akka.contrib.persistence.hbase.snapshot
+package akka.persistence.hbase.snapshot
 
 import akka.testkit.{TestProbe, TestKit}
 import akka.actor.{Props, ActorRef, ActorSystem}
 import org.scalatest.FlatSpecLike
 import akka.persistence.{SnapshotMetadata, SaveSnapshotFailure, SaveSnapshotSuccess, Processor}
 
-object HBaseSnapshotStoreTest {
+object HadoopSnapshotStoreTest {
   class SnapshottingActor(tellMe: ActorRef) extends Processor {
     var data = List[String]()
 
@@ -31,11 +31,11 @@ object HBaseSnapshotStoreTest {
   case class SnapshotFail(meta: SnapshotMetadata, reason: Throwable)
 }
 
-class HBaseSnapshotStoreTest extends TestKit(ActorSystem("snapshot-test")) with FlatSpecLike {
+class HadoopSnapshotStoreTest extends TestKit(ActorSystem("snapshot-test")) with FlatSpecLike {
 
   behavior of "HBaseSnapshotStore"
 
-  import HBaseSnapshotStoreTest._
+  import HadoopSnapshotStoreTest._
 
   it should "store a snapshot" in {
     // given

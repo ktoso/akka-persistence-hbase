@@ -20,18 +20,17 @@ object HBaseJournalInit {
     val conf = getHBaseConfig(config)
     val admin = new HBaseAdmin(conf)
 
-    val messagesTable = config.getString("messages-table")
-    val snapshotsTable = config.getString("snapshots-table")
+    val table = config.getString("table")
     val familyName = config.getString("family")
 
     try {
-      doInit
+      doInitTable(admin, table, familyName)
     } finally {
       admin.close()
     }
   }
 
-  private def doInit(admin: HBaseAdmin, tableName: String, familyName: String): Boolean = {
+  private def doInitTable(admin: HBaseAdmin, tableName: String, familyName: String): Boolean = {
     if (admin.tableExists(tableName)) {
       val tableDesc = admin.getTableDescriptor(toBytes(tableName))
       if (tableDesc.getFamily(toBytes(familyName)) == null) {
