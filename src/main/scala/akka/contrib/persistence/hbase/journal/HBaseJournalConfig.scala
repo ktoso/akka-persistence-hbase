@@ -1,4 +1,4 @@
-package akka.persistence.journal.hbase
+package akka.contrib.persistence.hbase.journal
 
 import com.typesafe.config.Config
 
@@ -14,7 +14,7 @@ import com.typesafe.config.Config
  */
 case class HBaseJournalConfig(
   zookeeperQuorum: String,
-  table: String,
+  messagesTable: String,
   family: String,
   partitionCount: Int,
   scanBatchSize: Int,
@@ -26,7 +26,7 @@ object HBaseJournalConfig {
   def apply(config: Config): HBaseJournalConfig = {
     HBaseJournalConfig(
       zookeeperQuorum = config.getString("hbase.zookeeper.quorum"),
-      table = config.getString("table"),
+      messagesTable = config.getString("messages-table"),
       family = config.getString("family"),
       partitionCount = config.getInt("partition.count"),
       scanBatchSize = config.getInt("scan-batch-size"),

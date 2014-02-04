@@ -1,4 +1,4 @@
-package akka.persistence.journal.hbase
+package akka.contrib.persistence.hbase.snapshot
 
 import akka.testkit.{TestProbe, TestKit}
 import akka.actor.{Props, ActorRef, ActorSystem}

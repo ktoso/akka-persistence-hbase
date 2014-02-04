@@ -1,4 +1,4 @@
-package akka.persistence.journal.hbase
+package akka.contrib.persistence.hbase.journal
 
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.hbase.client._
@@ -20,31 +20,37 @@ object HBaseJournalInit {
     val conf = getHBaseConfig(config)
     val admin = new HBaseAdmin(conf)
 
-    val tableName = config.getString("table")
+    val messagesTable = config.getString("messages-table")
+    val snapshotsTable = config.getString("snapshots-table")
     val familyName = config.getString("family")
 
     try {
-      if (admin.tableExists(tableName)) {
-        val tableDesc = admin.getTableDescriptor(toBytes(tableName))
-        if (tableDesc.getFamily(toBytes(familyName)) == null) {
-          // target family does not exists, will add it.
-          admin.addColumn(familyName, new HColumnDescriptor(familyName))
-          true
-        } else {
-          // existing table is OK, no modifications run.
-          false
-        }
-      } else {
-        val tableDesc = new HTableDescriptor(toBytes(tableName))
-        tableDesc.addFamily(new HColumnDescriptor(familyName))
-
-        admin.createTable(tableDesc)
-        true
-      }
+      doInit
     } finally {
       admin.close()
     }
   }
+
+  private def doInit(admin: HBaseAdmin, tableName: String, familyName: String): Boolean = {
+    if (admin.tableExists(tableName)) {
+      val tableDesc = admin.getTableDescriptor(toBytes(tableName))
+      if (tableDesc.getFamily(toBytes(familyName)) == null) {
+        // target family does not exists, will add it.
+        admin.addColumn(familyName, new HColumnDescriptor(familyName))
+        true
+      } else {
+        // existing table is OK, no modifications run.
+        false
+      }
+    } else {
+      val tableDesc = new HTableDescriptor(toBytes(tableName))
+      tableDesc.addFamily(new HColumnDescriptor(familyName))
+
+      admin.createTable(tableDesc)
+      true
+    }
+  }
+  
 
   /**
    * Construct Configuration, passing in all `hbase.*` keys from the typesafe Config.

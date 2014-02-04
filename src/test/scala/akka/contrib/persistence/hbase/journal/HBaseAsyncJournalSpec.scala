@@ -1,4 +1,4 @@
-package akka.persistence.journal.hbase
+package akka.contrib.persistence.hbase.journal
 
 import akka.persistence._
 import akka.testkit.{TestProbe, ImplicitSender, TestKit}
@@ -136,7 +136,7 @@ class HBaseAsyncJournalSpec extends TestKit(ActorSystem("test")) with ImplicitSe
     probe.expectMsgType[JournalProtocol.DeleteMessages](max = 10.seconds)
 
   override protected def afterAll() {
-    val tableName = config.getString("table")
+    val tableName = config.getString("messages-table")
 
     val admin = new HBaseAdmin(HBaseJournalInit.getHBaseConfig(config))
     admin.disableTable(tableName)

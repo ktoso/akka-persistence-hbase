@@ -1,4 +1,4 @@
-package akka.persistence.journal.hbase
+package akka.contrib.persistence.hbase.journal
 
 import akka.persistence.PersistentRepr
 import akka.actor.{ActorLogging, Actor}
@@ -8,7 +8,7 @@ import java.{util => ju}
 import scala.collection.mutable
 import org.apache.hadoop.hbase.util.Bytes
 import akka.persistence.journal.AsyncRecovery
-import akka.persistence.journal.hbase.util.DeferredConversions
+import akka.contrib.persistence.hbase.common.DeferredConversions
 
 trait HBaseAsyncRecovery extends AsyncRecovery with DeferredConversions {
   this: Actor with ActorLogging with HBaseAsyncWriteJournal with PersistenceMarkers =>

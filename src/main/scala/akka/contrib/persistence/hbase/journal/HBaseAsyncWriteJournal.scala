@@ -1,4 +1,4 @@
-package akka.persistence.journal.hbase
+package akka.contrib.persistence.hbase.journal
 
 import akka.persistence.journal.AsyncWriteJournal
 import akka.persistence.{PersistenceSettings, PersistentConfirmation, PersistentId, PersistentRepr}
@@ -8,7 +8,7 @@ import org.hbase.async.{HBaseClient => AsyncBaseClient, DeleteRequest, PutReques
 import org.apache.hadoop.hbase.util.Bytes
 import scala.collection.immutable
 import akka.serialization.SerializationExtension
-import akka.persistence.journal.hbase.util.DeferredConversions
+import akka.contrib.persistence.hbase.common.DeferredConversions
 
 /**
  * Asyncronous HBase Journal.
@@ -16,7 +16,7 @@ import akka.persistence.journal.hbase.util.DeferredConversions
  * Uses AsyncBase to implement asynchronous IPC with HBase.
  */
 class HBaseAsyncWriteJournal extends HBaseJournalBase with AsyncWriteJournal
-  with HBaseAsyncRecovery with PersistenceMarkers
+  with HBaseAsyncRecovery
   with DeferredConversions
   with ActorLogging {
 
@@ -36,7 +36,7 @@ class HBaseAsyncWriteJournal extends HBaseJournalBase with AsyncWriteJournal
   import Columns._
   import collection.JavaConverters._
 
-  override val client = HBaseAsyncWriteJournal.getClient(journalConfig, persistenceSettings)
+  override val client = HBaseClientFactory.getClient(journalConfig, persistenceSettings)
   
   // journal plugin api impl -------------------------------------------------------------------------------------------
 
@@ -131,41 +131,6 @@ class HBaseAsyncWriteJournal extends HBaseJournalBase with AsyncWriteJournal
     else markRowAsDeleted
   }
 
-  // execute ops
-
-  protected def deleteRow(key: Array[Byte]): Future[Unit] = {
-    log.debug(s"Permanently deleting row: ${Bytes.toString(key)}")
-    executeDelete(key)
-  }
-
-  protected def markRowAsDeleted(key: Array[Byte]): Future[Unit] = {
-    log.debug(s"Marking as deleted, for row: ${Bytes.toString(key)}")
-    executePut(key, Array(Marker), Array(DeletedMarkerBytes))
-  }
-
-  protected def executeDelete(key: Array[Byte]): Future[Unit] = {
-    val request = new DeleteRequest(TableBytes, key)
-    client.delete(request)
-  }
-  
-  protected def executePut(key: Array[Byte], qualifiers: Array[Array[Byte]], values: Array[Array[Byte]]): Future[Unit] = {
-    val request = new PutRequest(TableBytes, key, Family, qualifiers, values)
-    client.put(request)
-  }
-
-  /**
-   * Sends the buffered commands to HBase. Does not guarantee that they "complete" right away.
-   */
-  def flushWrites() {
-    client.flush()
-  }
-
-  private def newScanner() = {
-    val scanner = client.newScanner(Table)
-    scanner.setFamily(Family)
-    scanner
-  }
-
   override def postStop(): Unit = {
     client.shutdown()
     super.postStop()
@@ -176,24 +141,4 @@ object HBaseAsyncWriteJournal {
 
   case class Finished(written: Int)
 
-  private var _zookeeperQuorum: String = _
-
-  /** based on the docs, there should always be only one instance, reused even if we had more tables */
-  private lazy val client = new AsyncBaseClient(_zookeeperQuorum)
-
-  def getClient(config: HBaseJournalConfig, persistenceSettings: PersistenceSettings) = {
-    _zookeeperQuorum = config.zookeeperQuorum
-
-    // since we will be forcing a flush anyway after each batch, let's not make asyncbase flush more than it needs to.
-    // for example, we tell akka "200", but asyncbase was set to "20", so it would flush way more often than we'd expect it to.
-    // by setting the internal flushing to max(...), we're manually in hold of doing the flushing at the rigth moment.
-    val maxBatchSize = List(
-      persistenceSettings.journal.maxMessageBatchSize,
-      persistenceSettings.journal.maxConfirmationBatchSize,
-      persistenceSettings.journal.maxDeletionBatchSize
-    ).max.toShort
-
-    client.setFlushInterval(maxBatchSize)
-    client
-  }
 }

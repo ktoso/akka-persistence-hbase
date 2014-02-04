@@ -1,4 +1,4 @@
-package akka.persistence.journal.hbase
+package akka.contrib.persistence.hbase.journal
 
 import akka.persistence._
 import akka.actor.{ActorSystem, Actor, Props}
@@ -7,6 +7,7 @@ import org.scalatest.{BeforeAndAfterAll, Matchers, FlatSpecLike}
 import com.google.common.base.Stopwatch
 import concurrent.duration._
 import java.util.concurrent.TimeUnit
+import akka.contrib.persistence.hbase.journal.{HBaseJournalInit, HBaseAsyncWriteJournal}
 
 object SimplePerfSpec {
 
