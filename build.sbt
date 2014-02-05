@@ -26,8 +26,6 @@ libraryDependencies += "com.typesafe.akka" %% "akka-persistence-experimental" % 
 
 libraryDependencies += "com.typesafe.akka" %% "akka-testkit"       % akkaVersion % "test"
 
-libraryDependencies += "com.typesafe"      %% "scalalogging-slf4j" % "1.0.1"
-
 libraryDependencies += "org.scalatest"     %% "scalatest"          % "2.0" % "test"
 
 

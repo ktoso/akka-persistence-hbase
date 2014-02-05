@@ -20,7 +20,7 @@ class HBaseAsyncWriteJournal extends Actor with ActorLogging
   with HBaseAsyncRecovery {
 
   import RowTypeMarkers._
-  import HBaseAsyncWriteJournal._
+  import TestingEventProtocol._
 
   private lazy val config = context.system.settings.config
 
@@ -30,7 +30,7 @@ class HBaseAsyncWriteJournal extends Actor with ActorLogging
 
   lazy val client = HBaseClientFactory.getClient(hBasePersistenceSettings, new PersistenceSettings(config.getConfig("akka.persistence")))
 
-  lazy val publish = hBasePersistenceSettings.publishTestingEvents
+  lazy val publishTestingEvents = hBasePersistenceSettings.publishTestingEvents
 
   implicit override val executionContext = context.system.dispatchers.lookup(hBasePersistenceSettings.pluginDispatcherId)
 
@@ -56,9 +56,9 @@ class HBaseAsyncWriteJournal extends Actor with ActorLogging
     }
 
     flushWrites()
-    val f = Future.sequence(futures)
-    if (publish) f map { _ => context.system.eventStream.publish(Finished(persistentBatch.size)) }
-    f
+    Future.sequence(futures) map {
+      case _ if publishTestingEvents => context.system.eventStream.publish(FinishedWrites(persistentBatch.size))
+    }
   }
 
   override def asyncWriteConfirmations(confirmations: immutable.Seq[PersistentConfirmation]): Future[Unit] = {
@@ -136,10 +136,4 @@ class HBaseAsyncWriteJournal extends Actor with ActorLogging
     client.shutdown()
     super.postStop()
   }
-}
-
-object HBaseAsyncWriteJournal {
-
-  case class Finished(written: Int)
-
 }

@@ -2,17 +2,16 @@ package akka.persistence.hbase.journal
 
 import org.hbase.async.HBaseClient
 import akka.persistence.PersistenceSettings
+import java.util.concurrent.atomic.AtomicReference
 
 object HBaseClientFactory {
 
-  private var _zookeeperQuorum: String = _
-
   /** based on the docs, there should always be only one instance, reused even if we had more tables */
-  private lazy val client = new HBaseClient(_zookeeperQuorum)
+  private val client = new AtomicReference[HBaseClient]()
 
   /** Always returns the same client */
-  def getClient(config: HBasePersistenceSettings, persistenceSettings: PersistenceSettings) = {
-    _zookeeperQuorum = config.zookeeperQuorum
+  def getClient(config: HBasePersistenceSettings, persistenceSettings: PersistenceSettings): HBaseClient = {
+    client.compareAndSet(null, new HBaseClient(config.zookeeperQuorum))
 
     // since we will be forcing a flush anyway after each batch, let's not make asyncbase flush more than it needs to.
     // for example, we tell akka "200", but asyncbase was set to "20", so it would flush way more often than we'd expect it to.
@@ -23,8 +22,13 @@ object HBaseClientFactory {
       persistenceSettings.journal.maxDeletionBatchSize
     ).max.toShort
 
-    client.setFlushInterval(maxBatchSize)
-    client
+    val hbaseClient = client.get()
+    hbaseClient.setFlushInterval(maxBatchSize)
+    hbaseClient
+  }
+
+  def reset() {
+    client set null
   }
 
 }

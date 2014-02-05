@@ -125,6 +125,9 @@ class HBaseAsyncJournalSpec extends TestKit(ActorSystem("test")) with ImplicitSe
     expectMsg("b-9")
   }
 
+  // is assured, but no test yet
+  it should "don't apply snapshots the same way as messages" in pending
+
 
   def subscribeToConfirmation(probe: TestProbe): Unit =
     system.eventStream.subscribe(probe.ref, classOf[DeliveredByChannel])
@@ -145,6 +148,8 @@ class HBaseAsyncJournalSpec extends TestKit(ActorSystem("test")) with ImplicitSe
     admin.disableTable(tableName)
     admin.deleteTable(tableName)
     admin.close()
+
+    HBaseClientFactory.reset()
 
     system.shutdown()
   }

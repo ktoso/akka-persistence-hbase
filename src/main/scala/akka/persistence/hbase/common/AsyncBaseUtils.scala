@@ -1,11 +1,10 @@
 package akka.persistence.hbase.common
 
 import org.hbase.async.{HBaseClient, PutRequest, DeleteRequest, KeyValue}
-import java. { util => ju }
+import java.{util => ju}
 import org.apache.hadoop.hbase.util.Bytes
 import scala.concurrent.{ExecutionContext, Future}
 import scala.Array
-import akka.event.LoggingAdapter
 import akka.persistence.hbase.journal.RowTypeMarkers._
 import akka.persistence.hbase.common.Columns._
 import akka.persistence.hbase.journal.HBasePersistenceSettings
@@ -23,6 +22,9 @@ trait AsyncBaseUtils {
 
   import Columns._
   import DeferredConversions._
+
+  protected def isSnapshotRow(columns: Seq[KeyValue]): Boolean =
+    ju.Arrays.equals(findColumn(columns, Marker).value, SnapshotMarkerBytes)
 
   protected def findColumn(columns: Seq[KeyValue], qualifier: Array[Byte]): KeyValue =
     columns find { kv =>

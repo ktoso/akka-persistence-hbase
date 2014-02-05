@@ -13,8 +13,6 @@ object HadoopSnapshotterExtensionId extends ExtensionId[HadoopSnapshotter]
   override def lookup() = HadoopSnapshotterExtensionId
 
   override def createExtension(system: ExtendedActorSystem) = {
-    println("Loading extension!!!!!")
-
     val config = system.settings.config
     val snapshotterImpl = config.getString(SnapshotStoreImplKey)
 

@@ -14,11 +14,13 @@ import scala.collection.immutable
 import akka.persistence.serialization.Snapshot
 import akka.serialization.SerializationExtension
 import scala.util.{Failure, Success, Try}
-import com.typesafe.scalalogging.slf4j.Logging
+import akka.persistence.hbase.common.TestingEventProtocol.DeletedSnapshotsFor
 
 class HBaseSnapshotter(system: ActorSystem, val hBasePersistenceSettings: HBasePersistenceSettings, val client: HBaseClient)
-  extends HadoopSnapshotter with Logging
+  extends HadoopSnapshotter
   with AsyncBaseUtils with DeferredConversions {
+
+  val log = system.log
 
   private val serialization = SerializationExtension(system)
 
@@ -34,9 +36,8 @@ class HBaseSnapshotter(system: ActorSystem, val hBasePersistenceSettings: HBaseP
   import Columns._
   import RowTypeMarkers._
 
-  println("Using Hbase snapshotter!!!")
-
   def loadAsync(processorId: String, criteria: SnapshotSelectionCriteria): Future[Option[SelectedSnapshot]] = {
+    log.debug("Loading async for processorId: [{}] on criteria: {}", processorId, criteria)
     val scanner = newScanner()
     val SnapshotSelectionCriteria(maxSequenceNr, maxTimestamp) = criteria
 
@@ -53,6 +54,7 @@ class HBaseSnapshotter(system: ActorSystem, val hBasePersistenceSettings: HBaseP
       case null =>
         promise trySuccess None // got to end of Scan, if nothing completed, we complete with "found no valid snapshot"
         scanner.close()
+        log.debug("Finished async load for processorId: [{}] on criteria: {}", processorId, criteria)
 
       case rows: AsyncBaseRows =>
         val maybeSnapshot: Option[(Long, Snapshot)] = for {
@@ -73,12 +75,13 @@ class HBaseSnapshotter(system: ActorSystem, val hBasePersistenceSettings: HBaseP
     }
 
     def go() = scanner.nextRows(1) map completePromiseWithFirstDeserializedSnapshot
+    go()
 
     promise.future
   }
 
   def saveAsync(meta: SnapshotMetadata, snapshot: Any): Future[Unit] = {
-    logger.info("saveAsync - hbase impl")
+    log.debug("Saving async, of {}", meta)
     saving += meta
 
     serialize(Snapshot(snapshot)) match {
@@ -92,24 +95,53 @@ class HBaseSnapshotter(system: ActorSystem, val hBasePersistenceSettings: HBaseP
       case Failure(ex) =>
         Future failed ex
     }
-
   }
 
   def saved(meta: SnapshotMetadata): Unit = {
+    log.debug("Saved: {}", meta)
     saving -= meta
-    logger.info("saved! {}", meta)
   }
 
   def delete(meta: SnapshotMetadata): Unit = {
+    log.debug("Deleting: {}", meta)
     saving -= meta
-
-    // todo delete
-
-    logger.info("deleted! {}", meta)
+    executeDelete(RowKey(meta.processorId, meta.sequenceNr).toBytes)
   }
 
   def delete(processorId: String, criteria: SnapshotSelectionCriteria): Unit = {
-    ???
+    log.debug("Deleting processorId: [{}], criteria: {}", processorId, criteria)
+
+    val scanner = newScanner()
+
+    val start = RowKey.firstForProcessor(processorId)
+    val stop = RowKey(processorId, criteria.maxSequenceNr)
+
+    scanner.setStartKey(start.toBytes)
+    scanner.setStopKey(stop.toBytes)
+    scanner.setKeyRegexp(RowKey.patternForProcessor(processorId))
+
+    def handleRows(in: AnyRef): Future[Unit] = in match {
+      case null =>
+        log.debug("Finished scanning for snapshots to delete")
+        flushWrites()
+        scanner.close()
+        Future.successful()
+
+      case rows: AsyncBaseRows =>
+        val deletes = for {
+          row <- rows.asScala
+          col <- row.asScala.headOption
+          if isSnapshotRow(row.asScala)
+        } yield deleteRow(col.key)
+
+        go() flatMap { _ => Future.sequence(deletes) }
+    }
+
+    def go(): Future[Unit] = scanner.nextRows() flatMap handleRows
+
+    go() map {
+      case _ if settings.publishTestingEvents => system.eventStream.publish(DeletedSnapshotsFor(processorId, criteria))
+    }
   }
 
   private def deserialize(bytes: Array[Byte]): Try[Snapshot] =

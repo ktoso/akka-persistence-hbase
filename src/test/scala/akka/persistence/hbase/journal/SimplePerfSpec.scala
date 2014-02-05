@@ -7,19 +7,18 @@ import org.scalatest.{DoNotDiscover, BeforeAndAfterAll, Matchers, FlatSpecLike}
 import com.google.common.base.Stopwatch
 import concurrent.duration._
 import java.util.concurrent.TimeUnit
+import akka.persistence.hbase.common.TestingEventProtocol._
 
 object SimplePerfSpec {
 
   class Writer(Until: Int, override val processorId: String) extends Processor {
 
-    import HBaseAsyncWriteJournal._
-
     def receive = {
       case Persistent(payload, sequenceNr) =>
 
       case Persistent(payload, Until) =>
-        context.system.eventStream.publish (Finished(Until))
-        sender ! Finished(Until)
+        context.system.eventStream.publish (FinishedWrites(Until))
+        sender ! FinishedWrites(Until)
     }
   }
 
@@ -30,7 +29,6 @@ class SimplePerfSpec extends TestKit(ActorSystem("test")) with FlatSpecLike
   with Matchers with BeforeAndAfterAll {
 
   import SimplePerfSpec._
-  import HBaseAsyncWriteJournal._
 
   val config = system.settings.config.getConfig("hbase-journal")
 
@@ -45,7 +43,7 @@ class SimplePerfSpec extends TestKit(ActorSystem("test")) with FlatSpecLike
   it should s"write $messagesNr messages" in {
     // given
     val probe = TestProbe()
-    system.eventStream.subscribe(probe.ref, classOf[Finished])
+    system.eventStream.subscribe(probe.ref, classOf[FinishedWrites])
 
     val msg = Persistent("Hello!")
 
@@ -61,9 +59,9 @@ class SimplePerfSpec extends TestKit(ActorSystem("test")) with FlatSpecLike
     }
 
     // then
-    probe.expectMsg(max = 2.minute, Finished(1))
-    (messagesNr / 200 - 1).times { probe.expectMsg(max = 2.minute, Finished(200)); }
-    probe.expectMsg(max = 2.minute, Finished(199))
+    probe.expectMsg(max = 2.minute, FinishedWrites(1))
+    (messagesNr / 200 - 1).times { probe.expectMsg(max = 2.minute, FinishedWrites(200)); }
+    probe.expectMsg(max = 2.minute, FinishedWrites(199))
     stopwatch.stop()
     system.eventStream.unsubscribe(probe.ref)
 
