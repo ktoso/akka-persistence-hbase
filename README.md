@@ -37,7 +37,12 @@ TODO
 ----
 
 * Scans can be made more parallel - due to the fact we have "partitions"
+* HDFS snapshots (~HBase snapshots are done already~)
 * Stress testing and some metrics
+
+More akka-persistence backends:
+-------------------------------
+A list is maintained here: https://gist.github.com/krasserm/8612920#file-akka-persistence-plugins-md
 
 License
 -------
