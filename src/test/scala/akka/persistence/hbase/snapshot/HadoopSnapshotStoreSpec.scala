@@ -103,6 +103,7 @@ class HadoopSnapshotStoreSpec extends TestKit(ActorSystem("test")) with FlatSpec
     // given
     val probe = TestProbe()
     val actor = system.actorOf(Props(classOf[SnapshottingActor], probe.ref, "snap-1"))
+    Thread.sleep(1000)
 
     // when
     actor ! DeleteSnapshot(3)
@@ -110,6 +111,7 @@ class HadoopSnapshotStoreSpec extends TestKit(ActorSystem("test")) with FlatSpec
 
     // then
     val actor2 = system.actorOf(Props(classOf[SnapshottingActor], probe.ref, "snap-1"))
+    Thread.sleep(1000)
     expectNoMsg(2.seconds) // we deleted the snapshot, nothing there to replay
 
     actor2 ! "d"
