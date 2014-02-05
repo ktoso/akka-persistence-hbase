@@ -9,6 +9,7 @@ import scala.collection.mutable
 import org.apache.hadoop.hbase.util.Bytes
 import akka.persistence.journal._
 import akka.persistence.hbase.common.{Columns, RowKey, DeferredConversions}
+import scala.annotation.switch
 
 trait HBaseAsyncRecovery extends AsyncRecovery {
   this: Actor with ActorLogging with HBaseAsyncWriteJournal =>
@@ -103,14 +104,14 @@ trait HBaseAsyncRecovery extends AsyncRecovery {
     val marker = Bytes.toString(markerKeyValue.value)
 
     // todo make this a @switch
-    marker match {
-      case AcceptedMarker =>
+    (markerKeyValue.value.head.toChar: @switch) match {
+      case 'A' =>
         replayCallback(msg)
 
-      case DeletedMarker =>
+      case 'D' =>
         msg = msg.update(deleted = true)
 
-      case SnapshotMarker =>
+      case 'S' =>
         // thanks to treating Snapshot rows as deleted entries, we won't suddenly apply a Snapshot() where the
         // our Processor expects a normal message. This is implemented for the HBase backed snapshot storage,
         // if you use the HDFS storage there won't be any snapshot entries in here.
