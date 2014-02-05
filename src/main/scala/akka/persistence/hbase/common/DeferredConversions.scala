@@ -1,4 +1,4 @@
-package akka.contrib.persistence.hbase.common
+package akka.persistence.hbase.common
 
 import com.stumbleupon.async._
 import scala.concurrent.{ExecutionContext, Promise, Future}
@@ -34,3 +34,5 @@ trait DeferredConversions {
       def call(arg: T): R = fn(arg)
     }
 }
+
+object DeferredConversions extends DeferredConversions

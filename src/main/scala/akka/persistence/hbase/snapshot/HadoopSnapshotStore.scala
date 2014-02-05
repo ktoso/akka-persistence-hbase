@@ -1,22 +1,16 @@
 package akka.persistence.hbase.snapshot
 
 import akka.persistence.snapshot.SnapshotStore
-import akka.persistence.{PersistenceSettings, SelectedSnapshot, SnapshotSelectionCriteria}
+import akka.persistence.{SelectedSnapshot, SnapshotSelectionCriteria}
 import scala.concurrent.Future
 import akka.persistence.SnapshotMetadata
 import akka.actor.ActorLogging
-import akka.contrib.persistence.hbase.common.DeferredConversions
 
-class HadoopSnapshotStore extends SnapshotStore with ActorLogging
-  with DeferredConversions {
+class HadoopSnapshotStore extends SnapshotStore with ActorLogging {
 
-  val snap = HadoopSnapshotterExtension(context.system)
+  println("snapshot store!!!!")
 
-  // todo deduplicate obtaining settings ======
-
-  lazy val persistenceSettings = new PersistenceSettings(context.system.settings.config.getConfig("akka.persistence"))
-
-  // todo deduplicate obtaining settings ======
+  val snap = HadoopSnapshotterExtensionId(context.system)
 
   def loadAsync(processorId: String, criteria: SnapshotSelectionCriteria): Future[Option[SelectedSnapshot]] = {
     snap.loadAsync(processorId: String, criteria: SnapshotSelectionCriteria)
@@ -38,4 +32,5 @@ class HadoopSnapshotStore extends SnapshotStore with ActorLogging
 
   def delete(processorId: String, criteria: SnapshotSelectionCriteria): Unit = {
     snap.delete(processorId, criteria)
-  }}
+  }
+}

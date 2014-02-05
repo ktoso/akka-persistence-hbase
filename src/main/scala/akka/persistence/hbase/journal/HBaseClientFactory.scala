@@ -1,6 +1,6 @@
-package akka.contrib.persistence.hbase.journal
+package akka.persistence.hbase.journal
 
-import org.hbase.async. { HBaseClient => AsyncBaseClient }
+import org.hbase.async.HBaseClient
 import akka.persistence.PersistenceSettings
 
 object HBaseClientFactory {
@@ -8,10 +8,10 @@ object HBaseClientFactory {
   private var _zookeeperQuorum: String = _
 
   /** based on the docs, there should always be only one instance, reused even if we had more tables */
-  private lazy val client = new AsyncBaseClient(_zookeeperQuorum)
+  private lazy val client = new HBaseClient(_zookeeperQuorum)
 
   /** Always returns the same client */
-  def getClient(config: HBaseJournalConfig, persistenceSettings: PersistenceSettings) = {
+  def getClient(config: HBasePersistenceSettings, persistenceSettings: PersistenceSettings) = {
     _zookeeperQuorum = config.zookeeperQuorum
 
     // since we will be forcing a flush anyway after each batch, let's not make asyncbase flush more than it needs to.

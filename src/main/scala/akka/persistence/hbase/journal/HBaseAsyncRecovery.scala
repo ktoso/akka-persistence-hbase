@@ -1,4 +1,4 @@
-package akka.contrib.persistence.hbase.journal
+package akka.persistence.hbase.journal
 
 import akka.persistence.PersistentRepr
 import akka.actor.{ActorLogging, Actor}
@@ -7,20 +7,23 @@ import org.hbase.async.{KeyValue, HBaseClient}
 import java.{util => ju}
 import scala.collection.mutable
 import org.apache.hadoop.hbase.util.Bytes
-import akka.persistence.journal.AsyncRecovery
-import akka.contrib.persistence.hbase.common.DeferredConversions
+import akka.persistence.journal._
+import akka.persistence.hbase.common.{Columns, RowKey, DeferredConversions}
 
-trait HBaseAsyncRecovery extends AsyncRecovery with DeferredConversions {
-  this: Actor with ActorLogging with HBaseAsyncWriteJournal with PersistenceMarkers =>
+trait HBaseAsyncRecovery extends AsyncRecovery {
+  this: Actor with ActorLogging with HBaseAsyncWriteJournal =>
 
   private[persistence] def client: HBaseClient
 
-  private[persistence] def journalConfig: HBaseJournalConfig
+  private[persistence] implicit def hBasePersistenceSettings: HBasePersistenceSettings
 
-  private lazy val replayDispatcherId = journalConfig.replayDispatcherId
-  private implicit lazy val replayDispatcher = context.system.dispatchers.lookup(replayDispatcherId)
+  private lazy val replayDispatcherId = hBasePersistenceSettings.replayDispatcherId
+
+  override implicit val executionContext = context.system.dispatchers.lookup(replayDispatcherId)
 
   import Columns._
+  import RowTypeMarkers._
+  import DeferredConversions._
   import collection.JavaConverters._
 
   // async recovery plugin impl
@@ -35,7 +38,7 @@ trait HBaseAsyncRecovery extends AsyncRecovery with DeferredConversions {
     scanner.setStopKey(RowKey(processorId, toSequenceNr).toBytes)
     scanner.setKeyRegexp(RowKey.patternForProcessor(processorId))
 
-    scanner.setMaxNumRows(journalConfig.scanBatchSize)
+    scanner.setMaxNumRows(hBasePersistenceSettings.scanBatchSize)
 
     val callback = replay(replayCallback) _
 
@@ -121,12 +124,6 @@ trait HBaseAsyncRecovery extends AsyncRecovery with DeferredConversions {
     val messageKeyValue = findColumn(columns, Message)
     val msg = persistentFromBytes(messageKeyValue.value)
     msg.sequenceNr
-  }
-
-  private def newScanner() = {
-    val scanner = client.newScanner(Table)
-    scanner.setFamily(Family)
-    scanner
   }
 
 }

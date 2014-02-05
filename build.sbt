@@ -24,9 +24,11 @@ libraryDependencies += "org.slf4j"         % "slf4j-log4j12" % "1.6.0"
 
 libraryDependencies += "com.typesafe.akka" %% "akka-persistence-experimental" % akkaVersion % "compile"
 
-libraryDependencies += "com.typesafe.akka" %% "akka-testkit" % akkaVersion % "test"
+libraryDependencies += "com.typesafe.akka" %% "akka-testkit"       % akkaVersion % "test"
 
-libraryDependencies += "org.scalatest"     %% "scalatest"    % "2.0" % "test"
+libraryDependencies += "com.typesafe"      %% "scalalogging-slf4j" % "1.0.1"
+
+libraryDependencies += "org.scalatest"     %% "scalatest"          % "2.0" % "test"
 
 
 parallelExecution in Test := false

@@ -1,4 +1,4 @@
-package akka.contrib.persistence.hbase.journal
+package akka.persistence.hbase.journal
 
 import org.apache.hadoop.conf.Configuration
 import org.apache.hadoop.hbase.client._
@@ -20,14 +20,11 @@ object HBaseJournalInit {
     val conf = getHBaseConfig(config)
     val admin = new HBaseAdmin(conf)
 
-    val table = config.getString("table")
-    val familyName = config.getString("family")
+    val journalConfig = config.getConfig("hbase-journal")
+    val table = journalConfig.getString("table")
+    val familyName = journalConfig.getString("family")
 
-    try {
-      doInitTable(admin, table, familyName)
-    } finally {
-      admin.close()
-    }
+    try doInitTable(admin, table, familyName) finally admin.close()
   }
 
   private def doInitTable(admin: HBaseAdmin, tableName: String, familyName: String): Boolean = {
@@ -57,7 +54,9 @@ object HBaseJournalInit {
   def getHBaseConfig(config: Config): Configuration = {
     val c = new Configuration()
     @inline def hbaseKey(s: String) = "hbase." + s
-    val hbaseConfig = config.getConfig("hbase")
+
+    val journalConfig = config.getConfig("hbase-journal")
+    val hbaseConfig = journalConfig.getConfig("hbase")
 
     // todo does not cover all cases
     hbaseConfig.entrySet().asScala foreach { e =>

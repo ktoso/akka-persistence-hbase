@@ -1,4 +1,4 @@
-package akka.contrib.persistence.hbase.journal
+package akka.persistence.hbase.journal
 
 import akka.persistence._
 import akka.testkit.{TestProbe, ImplicitSender, TestKit}
@@ -47,9 +47,11 @@ class HBaseAsyncJournalSpec extends TestKit(ActorSystem("test")) with ImplicitSe
 
   import HBaseAsyncJournalSpec._
 
-  val config = system.settings.config.getConfig("hbase-journal")
+  val config = system.settings.config
 
   behavior of "HBaseJournal"
+
+  val timeout = 5.seconds
 
   override protected def beforeAll() {
     HBaseJournalInit.createTable(config)
@@ -57,19 +59,20 @@ class HBaseAsyncJournalSpec extends TestKit(ActorSystem("test")) with ImplicitSe
 
   it should "write and replay messages" in {
     val processor1 = system.actorOf(Props(classOf[ProcessorA], "p1"))
+    info("p1 = " + processor1)
 
     processor1 ! Persistent("a")
     processor1 ! Persistent("aa")
-    expectMsgAllOf(max = 5.seconds, "a", 1L, false)
-    expectMsgAllOf(max = 5.seconds, "aa", 2L, false)
+    expectMsgAllOf(max = timeout, "a", 1L, false)
+    expectMsgAllOf(max = timeout, "aa", 2L, false)
 
     val processor2 = system.actorOf(Props(classOf[ProcessorA], "p1"))
     processor2 ! Persistent("b")
     processor2 ! Persistent("c")
-    expectMsgAllOf(max = 5.seconds, "a", 1L, true)
-    expectMsgAllOf(max = 5.seconds, "aa", 2L, true)
-    expectMsgAllOf(max = 5.seconds, "b", 3L, false)
-    expectMsgAllOf(max = 5.seconds, "c", 4L, false)
+    expectMsgAllOf(max = timeout, "a", 1L, true)
+    expectMsgAllOf(max = timeout, "aa", 2L, true)
+    expectMsgAllOf(max = timeout, "b", 3L, false)
+    expectMsgAllOf(max = timeout, "c", 4L, false)
   }
 
   it should "not replay messages marked as deleted" in {
@@ -79,14 +82,14 @@ class HBaseAsyncJournalSpec extends TestKit(ActorSystem("test")) with ImplicitSe
     val processor1 = system.actorOf(Props(classOf[ProcessorA], "p2"))
     processor1 ! Persistent("a")
     processor1 ! Persistent("b")
-    expectMsgAllOf(max = 5.seconds, "a", 1L, false)
-    expectMsgAllOf(max = 5.seconds, "b", 2L, false)
+    expectMsgAllOf(max = timeout, "a", 1L, false)
+    expectMsgAllOf(max = timeout, "b", 2L, false)
     processor1 ! Delete(1L, false)
 
     awaitDeletion(deleteProbe)
 
     system.actorOf(Props(classOf[ProcessorA], "p2"))
-    expectMsgAllOf(max = 5.seconds, "b", 2L, true)
+    expectMsgAllOf(max = timeout, "b", 2L, true)
   }
 
   it should "not replay permanently deleted messages" in {
@@ -96,8 +99,8 @@ class HBaseAsyncJournalSpec extends TestKit(ActorSystem("test")) with ImplicitSe
     val processor1 = system.actorOf(Props(classOf[ProcessorA], "p3"))
     processor1 ! Persistent("a")
     processor1 ! Persistent("b")
-    expectMsgAllOf(max = 5.seconds, "a", 1L, false)
-    expectMsgAllOf(max = 5.seconds, "b", 2L, false)
+    expectMsgAllOf(max = timeout, "a", 1L, false)
+    expectMsgAllOf(max = timeout, "b", 2L, false)
     processor1 ! Delete(1L, true)
     awaitDeletion(deleteProbe)
 
@@ -136,7 +139,7 @@ class HBaseAsyncJournalSpec extends TestKit(ActorSystem("test")) with ImplicitSe
     probe.expectMsgType[JournalProtocol.DeleteMessages](max = 10.seconds)
 
   override protected def afterAll() {
-    val tableName = config.getString("messages-table")
+    val tableName = config.getString("hbase-journal.table")
 
     val admin = new HBaseAdmin(HBaseJournalInit.getHBaseConfig(config))
     admin.disableTable(tableName)

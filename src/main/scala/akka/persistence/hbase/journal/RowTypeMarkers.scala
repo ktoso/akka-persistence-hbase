@@ -1,8 +1,8 @@
-package akka.contrib.persistence.hbase.journal
+package akka.persistence.hbase.journal
 
 import org.apache.hadoop.hbase.util.Bytes
 
-trait PersistenceMarkers {
+object RowTypeMarkers {
 
   import Bytes._
 
@@ -13,7 +13,7 @@ trait PersistenceMarkers {
   val DeletedMarkerBytes = toBytes(DeletedMarker)
 
   val SnapshotMarker = "S"
-  val SnapshotMarkerBytes = toBytes(DeletedMarker)
+  val SnapshotMarkerBytes = toBytes(SnapshotMarker)
 
   def confirmedMarker(channelId: String) = s"C-$channelId"
   def confirmedMarkerBytes(channelId: String) = toBytes(confirmedMarker(channelId))

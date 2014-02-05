@@ -3,3 +3,6 @@
 *.iml
 target/
 src/test/resources/application.conf
+
+# local snapshots
+snapshots

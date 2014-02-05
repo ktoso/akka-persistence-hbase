@@ -1,13 +1,12 @@
-package akka.contrib.persistence.hbase.journal
+package akka.persistence.hbase.journal
 
 import akka.persistence._
-import akka.actor.{ActorSystem, Actor, Props}
-import akka.testkit.{TestProbe, ImplicitSender, TestKit}
-import org.scalatest.{BeforeAndAfterAll, Matchers, FlatSpecLike}
+import akka.actor.{ActorSystem, Props}
+import akka.testkit.{TestProbe, TestKit}
+import org.scalatest.{DoNotDiscover, BeforeAndAfterAll, Matchers, FlatSpecLike}
 import com.google.common.base.Stopwatch
 import concurrent.duration._
 import java.util.concurrent.TimeUnit
-import akka.contrib.persistence.hbase.journal.{HBaseJournalInit, HBaseAsyncWriteJournal}
 
 object SimplePerfSpec {
 
@@ -26,7 +25,7 @@ object SimplePerfSpec {
 
 }
 
-
+@DoNotDiscover
 class SimplePerfSpec extends TestKit(ActorSystem("test")) with FlatSpecLike
   with Matchers with BeforeAndAfterAll {
 

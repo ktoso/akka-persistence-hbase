@@ -1,43 +1,45 @@
-package akka.contrib.persistence.hbase.journal
+package akka.persistence.hbase.journal
 
 import akka.persistence.journal.AsyncWriteJournal
 import akka.persistence.{PersistenceSettings, PersistentConfirmation, PersistentId, PersistentRepr}
 import scala.concurrent._
-import akka.actor.ActorLogging
-import org.hbase.async.{HBaseClient => AsyncBaseClient, DeleteRequest, PutRequest}
+import akka.actor.{Actor, ActorLogging}
 import org.apache.hadoop.hbase.util.Bytes
 import scala.collection.immutable
 import akka.serialization.SerializationExtension
-import akka.contrib.persistence.hbase.common.DeferredConversions
+import akka.persistence.hbase.common.{RowKey, DeferredConversions}
+import akka.persistence.hbase.common._
 
 /**
  * Asyncronous HBase Journal.
  *
  * Uses AsyncBase to implement asynchronous IPC with HBase.
  */
-class HBaseAsyncWriteJournal extends HBaseJournalBase with AsyncWriteJournal
-  with HBaseAsyncRecovery
-  with DeferredConversions
-  with ActorLogging {
+class HBaseAsyncWriteJournal extends Actor with ActorLogging
+  with HBaseJournalBase with AsyncWriteJournal
+  with HBaseAsyncRecovery {
 
+  import RowTypeMarkers._
   import HBaseAsyncWriteJournal._
 
-  override val serialization = SerializationExtension(context.system)
+  private lazy val config = context.system.settings.config
 
-  override val config = context.system.settings.config.getConfig("hbase-journal")
-  
-  private val persistenceSettings = new PersistenceSettings(context.system.settings.config.getConfig("akka.persistence"))
+  implicit lazy val hBasePersistenceSettings = HBasePersistenceSettings(config)
 
-  private val publish = journalConfig.publishTestingEvents
+  lazy val hadoopConfig = HBaseJournalInit.getHBaseConfig(config)
 
-  import context.dispatcher
+  lazy val client = HBaseClientFactory.getClient(hBasePersistenceSettings, new PersistenceSettings(config.getConfig("akka.persistence")))
+
+  lazy val publish = hBasePersistenceSettings.publishTestingEvents
+
+  implicit override val executionContext = context.system.dispatchers.lookup(hBasePersistenceSettings.pluginDispatcherId)
+
 
   import Bytes._
   import Columns._
+  import DeferredConversions._
   import collection.JavaConverters._
 
-  override val client = HBaseClientFactory.getClient(journalConfig, persistenceSettings)
-  
   // journal plugin api impl -------------------------------------------------------------------------------------------
 
   override def asyncWriteMessages(persistentBatch: immutable.Seq[PersistentRepr]): Future[Unit] = {
@@ -110,7 +112,6 @@ class HBaseAsyncWriteJournal extends HBaseJournalBase with AsyncWriteJournal
     }
 
     def go() = scanner.nextRows() flatMap handleRows
-    
     go()
   }
 
