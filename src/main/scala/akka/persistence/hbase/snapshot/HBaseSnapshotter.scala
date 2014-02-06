@@ -16,13 +16,11 @@ import akka.serialization.SerializationExtension
 import scala.util.{Failure, Success, Try}
 import akka.persistence.hbase.common.TestingEventProtocol.DeletedSnapshotsFor
 
-class HBaseSnapshotter(system: ActorSystem, val hBasePersistenceSettings: HBasePersistenceSettings, val client: HBaseClient)
+class HBaseSnapshotter(val system: ActorSystem, val hBasePersistenceSettings: PluginPersistenceSettings, val client: HBaseClient)
   extends HadoopSnapshotter
   with AsyncBaseUtils with DeferredConversions {
 
   val log = system.log
-
-  private val serialization = SerializationExtension(system)
 
   implicit val settings = hBasePersistenceSettings
 
@@ -143,11 +141,5 @@ class HBaseSnapshotter(system: ActorSystem, val hBasePersistenceSettings: HBaseP
       case _ if settings.publishTestingEvents => system.eventStream.publish(DeletedSnapshotsFor(processorId, criteria))
     }
   }
-
-  private def deserialize(bytes: Array[Byte]): Try[Snapshot] =
-    serialization.deserialize(bytes, classOf[Snapshot])
-
-  private def serialize(snapshot: Snapshot): Try[Array[Byte]] =
-    serialization.serialize(snapshot)
 
 }

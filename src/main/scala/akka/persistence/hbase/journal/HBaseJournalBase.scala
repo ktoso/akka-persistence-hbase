@@ -20,7 +20,7 @@ trait HBaseJournalBase extends HBaseSerialization with AsyncBaseUtils {
 
   def client: HBaseClient
 
-  def hBasePersistenceSettings: HBasePersistenceSettings
+  def hBasePersistenceSettings: PluginPersistenceSettings
   def hadoopConfig: Configuration
 
   lazy val Table = hBasePersistenceSettings.table

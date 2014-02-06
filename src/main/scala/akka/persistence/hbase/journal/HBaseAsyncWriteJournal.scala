@@ -24,7 +24,7 @@ class HBaseAsyncWriteJournal extends Actor with ActorLogging
 
   private lazy val config = context.system.settings.config
 
-  implicit lazy val hBasePersistenceSettings = HBasePersistenceSettings(config)
+  implicit lazy val hBasePersistenceSettings = PluginPersistenceSettings(config)
 
   lazy val hadoopConfig = HBaseJournalInit.getHBaseConfig(config)
 

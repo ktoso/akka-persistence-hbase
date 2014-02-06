@@ -10,7 +10,7 @@ object HBaseClientFactory {
   private val client = new AtomicReference[HBaseClient]()
 
   /** Always returns the same client */
-  def getClient(config: HBasePersistenceSettings, persistenceSettings: PersistenceSettings): HBaseClient = {
+  def getClient(config: PluginPersistenceSettings, persistenceSettings: PersistenceSettings): HBaseClient = {
     client.compareAndSet(null, new HBaseClient(config.zookeeperQuorum))
 
     // since we will be forcing a flush anyway after each batch, let's not make asyncbase flush more than it needs to.

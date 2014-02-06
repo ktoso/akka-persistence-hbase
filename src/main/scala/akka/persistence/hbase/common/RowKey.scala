@@ -1,9 +1,9 @@
 package akka.persistence.hbase.common
 
 import org.apache.hadoop.hbase.util.Bytes
-import akka.persistence.hbase.journal.HBasePersistenceSettings
+import akka.persistence.hbase.journal.PluginPersistenceSettings
 
-case class RowKey(processorId: String, sequenceNr: Long)(implicit hBasePersistenceSettings: HBasePersistenceSettings) {
+case class RowKey(processorId: String, sequenceNr: Long)(implicit hBasePersistenceSettings: PluginPersistenceSettings) {
 
   def part = partition(sequenceNr)
   val toBytes = Bytes.toBytes(toKeyString)
@@ -23,13 +23,13 @@ object RowKey {
    * Since we're salting (prefixing) the entries with partition numbers,
    * we must use this pattern for scanning for "all messages for processorX"
    */
-  def patternForProcessor(processorId: String)(implicit journalConfig: HBasePersistenceSettings) = s""".*-$processorId-.*"""
+  def patternForProcessor(processorId: String)(implicit journalConfig: PluginPersistenceSettings) = s""".*-$processorId-.*"""
 
   /** First key possible, similar to: `0-id-000000000000000000000` */
-  def firstForProcessor(processorId: String)(implicit journalConfig: HBasePersistenceSettings) =
+  def firstForProcessor(processorId: String)(implicit journalConfig: PluginPersistenceSettings) =
     RowKey(processorId, 0)
 
   /** Last key possible, similar to: `999-id-Long.MaxValue` */
-  def lastForProcessor(processorId: String)(implicit journalConfig: HBasePersistenceSettings) =
+  def lastForProcessor(processorId: String)(implicit journalConfig: PluginPersistenceSettings) =
     RowKey(processorId, 0)
 }

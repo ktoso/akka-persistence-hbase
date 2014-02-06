@@ -2,12 +2,18 @@ package akka.persistence.hbase.snapshot
 
 import akka.persistence.{SelectedSnapshot, SnapshotSelectionCriteria, SnapshotMetadata}
 import scala.concurrent.Future
-import akka.actor.Extension
+import akka.actor.{ActorSystem, Extension}
+import scala.util.Try
+import akka.persistence.serialization.Snapshot
+import akka.serialization.SerializationExtension
 
 /**
  * Common API for Snapshotter implementations. Used to provide an interface for the Extension.
  */
 trait HadoopSnapshotter extends Extension {
+
+  def system: ActorSystem
+  protected val serialization = SerializationExtension(system)
 
   def loadAsync(processorId: String, criteria: SnapshotSelectionCriteria): Future[Option[SelectedSnapshot]]
 
@@ -18,5 +24,12 @@ trait HadoopSnapshotter extends Extension {
   def delete(metadata: SnapshotMetadata): Unit
 
   def delete(processorId: String, criteria: SnapshotSelectionCriteria): Unit
+
+  protected def deserialize(bytes: Array[Byte]): Try[Snapshot] =
+    serialization.deserialize(bytes, classOf[Snapshot])
+
+  protected def serialize(snapshot: Snapshot): Try[Array[Byte]] =
+    serialization.serialize(snapshot)
+
 
 }

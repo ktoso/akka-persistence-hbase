@@ -7,11 +7,11 @@ import scala.concurrent.{ExecutionContext, Future}
 import scala.Array
 import akka.persistence.hbase.journal.RowTypeMarkers._
 import akka.persistence.hbase.common.Columns._
-import akka.persistence.hbase.journal.HBasePersistenceSettings
+import akka.persistence.hbase.journal.PluginPersistenceSettings
 
 trait AsyncBaseUtils {
 
-  def hBasePersistenceSettings: HBasePersistenceSettings
+  def hBasePersistenceSettings: PluginPersistenceSettings
 
   def client: HBaseClient
 

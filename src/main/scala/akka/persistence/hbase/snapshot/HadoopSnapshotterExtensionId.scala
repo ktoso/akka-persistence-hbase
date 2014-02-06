@@ -1,9 +1,10 @@
 package akka.persistence.hbase.snapshot
 
 import akka.actor._
-import akka.persistence.hbase.journal.{HBasePersistenceSettings, HBaseClientFactory, HBaseJournalInit}
+import akka.persistence.hbase.journal.{PluginPersistenceSettings, HBaseClientFactory, HBaseJournalInit}
 import akka.persistence.PersistenceSettings
 import scala.Predef._
+import org.apache.hadoop.conf.Configuration
 
 object HadoopSnapshotterExtensionId extends ExtensionId[HadoopSnapshotter]
   with ExtensionIdProvider {
@@ -16,20 +17,22 @@ object HadoopSnapshotterExtensionId extends ExtensionId[HadoopSnapshotter]
     val config = system.settings.config
     val snapshotterImpl = config.getString(SnapshotStoreImplKey)
 
-    val hBasePersistenceSettings = HBasePersistenceSettings(config)
+    val pluginPersistenceSettings = PluginPersistenceSettings(config)
     val persistenceSettings = new PersistenceSettings(config.getConfig("akka.persistence"))
 
-    val client = HBaseClientFactory.getClient(hBasePersistenceSettings, persistenceSettings)
+    val client = HBaseClientFactory.getClient(pluginPersistenceSettings, persistenceSettings)
 
     val HBaseSnapshotterName = classOf[HBaseSnapshotter].getCanonicalName
     val HdfsSnapshotterName = classOf[HdfsSnapshotter].getCanonicalName
 
     snapshotterImpl match {
       case HBaseSnapshotterName =>
-        new HBaseSnapshotter(system, hBasePersistenceSettings, client)
+        system.log.info("Using {} snapshotter implementation", HBaseSnapshotterName)
+        new HBaseSnapshotter(system, pluginPersistenceSettings, client)
 
       case HdfsSnapshotterName =>
-        new HdfsSnapshotter()
+        system.log.info("Using {} snapshotter implementation", HdfsSnapshotterName)
+        new HdfsSnapshotter(system, pluginPersistenceSettings)
 
       case other =>
         throw new IllegalStateException(s"$SnapshotStoreImplKey must be set to either $HBaseSnapshotterName or $HdfsSnapshotterName! Was: $other")

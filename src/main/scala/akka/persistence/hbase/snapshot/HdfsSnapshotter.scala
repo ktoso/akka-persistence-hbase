@@ -2,23 +2,135 @@ package akka.persistence.hbase.snapshot
 
 import akka.persistence.{SelectedSnapshot, SnapshotSelectionCriteria, SnapshotMetadata}
 import scala.concurrent.Future
+import org.apache.hadoop.fs.{FileStatus, Path, FileSystem}
+import akka.actor.ActorSystem
+import akka.persistence.hbase.journal.PluginPersistenceSettings
+import java.net.URI
+import org.apache.hadoop.conf.Configuration
+import org.apache.commons.io.FilenameUtils
+import scala.util.{Try, Failure, Success}
+import akka.persistence.serialization.Snapshot
+import scala.annotation.tailrec
+import java.io.Closeable
+import org.apache.commons.io.IOUtils
+import scala.collection.immutable
 
 /**
 * Dump and read Snapshots to/from HDFS.
-*
-* May be useful if snapshots are really big, or if you need easy "take out" of your data (simpler to get file fomr HDFS than a certin row as file for HBase).
-*
-* @todo implement me :-)
 */
-class HdfsSnapshotter extends HadoopSnapshotter {
+class HdfsSnapshotter(val system: ActorSystem, settings: PluginPersistenceSettings)
+  extends HadoopSnapshotter {
 
-  def loadAsync(processorId: String, criteria: SnapshotSelectionCriteria): Future[Option[SelectedSnapshot]] = ???
+  val log = system.log
 
-  def saveAsync(meta: SnapshotMetadata, snapshot: Any): Future[Unit] = ???
+  implicit val executionContext = system.dispatchers.lookup("akka-hbase-persistence-dispatcher")
 
-  def saved(metadata: SnapshotMetadata): Unit = ???
+  private val conf = new Configuration
+  private val fs = FileSystem.get(URI.create(settings.zookeeperQuorum), conf) // todo allow passing in all conf?
 
-  def delete(metadata: SnapshotMetadata): Unit = ???
+  /** Snapshots we're in progress of saving */
+  private var saving = immutable.Set.empty[SnapshotMetadata]
 
-  def delete(processorId: String, criteria: SnapshotSelectionCriteria): Unit = ???
+  def loadAsync(processorId: String, criteria: SnapshotSelectionCriteria): Future[Option[SelectedSnapshot]] = {
+    log.info("[HDFS] Loading async, for processorId {}, criteria: {}", processorId, criteria)
+    val snapshotMetas = listSnapshots(settings.snapshotHdfsDir, processorId)
+
+    @tailrec def deserializeOrTryOlder(metas: List[HdfsSnapshotDescriptor]): Option[SelectedSnapshot] = metas match {
+      case Nil =>
+        None
+
+      case desc :: tail =>
+        tryLoadingSnapshot(desc) match {
+          case Success(snapshot) =>
+            Some(SelectedSnapshot(SnapshotMetadata(processorId, desc.seqNumber), snapshot))
+
+          case Failure(ex) =>
+            log.error(s"Failed to deserialize snapshot for $desc" + (if (tail.nonEmpty) ", trying previous one" else ""), ex)
+            deserializeOrTryOlder(tail)
+        }
+    }
+
+    // todo make configurable how many times we retry if deserialization fails (that's the take here)
+    Future { deserializeOrTryOlder(snapshotMetas.take(3)) }
+  }
+
+  def saveAsync(meta: SnapshotMetadata, snapshot: Any): Future[Unit] =
+    if (saving contains meta) {
+      Future.failed(new Exception(s"Already working on persisting of $meta, aborting this (duplicate) request."))
+    } else {
+      Future { serializeAndSave(meta, snapshot) }
+    }
+
+  def saved(meta: SnapshotMetadata) {
+    log.debug("Saved: {}", meta)
+    saving -= meta
+  }
+
+  def delete(meta: SnapshotMetadata) {
+    val desc = HdfsSnapshotDescriptor(meta)
+    fs.delete(new Path(settings.snapshotHdfsDir, desc.toFilename), true)
+    log.debug("Deleted snapshot: {}", desc)
+    saving -= meta
+  }
+
+  def delete(processorId: String, criteria: SnapshotSelectionCriteria) {
+    val toDelete = listSnapshots(settings.snapshotHdfsDir, processorId).dropWhile(_.seqNumber > criteria.maxSequenceNr)
+
+    toDelete foreach { desc =>
+      val path = new Path(settings.snapshotHdfsDir, desc.toFilename)
+      fs.delete(path, true)
+    }
+  }
+
+  // internals --------
+
+  /**
+   * Looks for snapshots stored in directory for given `processorId`.
+   * Guarantees that the returned list is sorted descending by the snapshots `seqNumber` (latest snapshot first).
+   */
+  private def listSnapshots(snapshotDir: String, processorId: String): List[HdfsSnapshotDescriptor] = {
+    val descs = fs.listStatus(new Path(snapshotDir)) flatMap { HdfsSnapshotDescriptor.from }
+    descs.sortBy(_.seqNumber).toList
+  }
+
+  private[snapshot] def serializeAndSave(meta: SnapshotMetadata, snapshot: Any) {
+    val desc = HdfsSnapshotDescriptor(meta)
+
+    serialization.serialize(Snapshot(snapshot)) match {
+      case Success(bytes) => withStream(fs.create(newHdfsPath(desc))) { _.write(bytes) }
+      case Failure(ex)    => log.error("Unable to serialize snapshot for meta: " + meta)
+    }
+
+  }
+
+  private[snapshot] def tryLoadingSnapshot(desc: HdfsSnapshotDescriptor): Try[Snapshot] = {
+    val path = new Path(settings.snapshotHdfsDir, desc.toFilename)
+
+    deserialize(withStream(fs.open(path)) { IOUtils.toByteArray })
+  }
+
+  private def withStream[S <: Closeable, A](stream: S)(fun: S => A): A =
+    try fun(stream) finally stream.close()
+
+  private def newHdfsPath(desc: HdfsSnapshotDescriptor) = new Path(settings.snapshotHdfsDir, desc.toFilename)
+
+  case class HdfsSnapshotDescriptor(processorId: String, seqNumber: Long, timestamp: Long) {
+    def toFilename = s"snapshot-$processorId-$seqNumber-$timestamp"
+  }
+  object HdfsSnapshotDescriptor {
+    val SnapshotNamePattern = """snapshot-([a-zA-Z0-9]+)-([0-9]+)-([0-9]+)""".r
+
+    def apply(meta: SnapshotMetadata): HdfsSnapshotDescriptor =
+      HdfsSnapshotDescriptor(meta.processorId, meta.sequenceNr, meta.timestamp)
+
+    def from(status: FileStatus): Option[HdfsSnapshotDescriptor] =
+      FilenameUtils.getBaseName(status.getPath.toString) match {
+        case SnapshotNamePattern(processorId, seqNumber, timestamp) =>
+          Some(HdfsSnapshotDescriptor(processorId, seqNumber.toLong, timestamp.toLong))
+
+        case _ =>
+          None
+      }
+
+  }
 }

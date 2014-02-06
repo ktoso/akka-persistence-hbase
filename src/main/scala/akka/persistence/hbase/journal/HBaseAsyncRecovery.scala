@@ -16,7 +16,7 @@ trait HBaseAsyncRecovery extends AsyncRecovery {
 
   private[persistence] def client: HBaseClient
 
-  private[persistence] implicit def hBasePersistenceSettings: HBasePersistenceSettings
+  private[persistence] implicit def hBasePersistenceSettings: PluginPersistenceSettings
 
   private lazy val replayDispatcherId = hBasePersistenceSettings.replayDispatcherId
 

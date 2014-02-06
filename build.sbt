@@ -26,7 +26,7 @@ libraryDependencies += "com.typesafe.akka" %% "akka-persistence-experimental" % 
 
 libraryDependencies += "com.typesafe.akka" %% "akka-testkit"       % akkaVersion % "test"
 
-libraryDependencies += "org.scalatest"     %% "scalatest"          % "2.0" % "test"
+libraryDependencies += "org.scalatest"     %% "scalatest"          % "2.0"       % "test"
 
 
 parallelExecution in Test := false

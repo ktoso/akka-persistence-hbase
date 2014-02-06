@@ -1,6 +1,7 @@
 package akka.persistence.hbase.journal
 
 import com.typesafe.config.Config
+import org.apache.hadoop.conf.Configuration
 
 /**
  *
@@ -12,7 +13,7 @@ import com.typesafe.config.Config
  * @param scanBatchSize when performing scans, how many items to we want to obtain per one next(N) call
  * @param replayDispatcherId dispatcher for fetching and replaying messages
  */
-case class HBasePersistenceSettings(
+case class PluginPersistenceSettings(
   zookeeperQuorum: String,
   table: String,
   family: String,
@@ -20,14 +21,17 @@ case class HBasePersistenceSettings(
   scanBatchSize: Int,
   pluginDispatcherId: String,
   replayDispatcherId: String,
-  publishTestingEvents: Boolean
+  publishTestingEvents: Boolean,
+  snapshotHdfsDir: String,
+  hadoopConfiguration: Configuration
 )
 
-object HBasePersistenceSettings {
-  def apply(rootConfig: Config): HBasePersistenceSettings = {
+object PluginPersistenceSettings {
+  def apply(rootConfig: Config): PluginPersistenceSettings = {
     val journalConfig = rootConfig.getConfig("hbase-journal")
+    val snapshotConfig = rootConfig.getConfig("hadoop-snapshot-store")
 
-    HBasePersistenceSettings(
+    PluginPersistenceSettings(
       zookeeperQuorum      = journalConfig.getString("hbase.zookeeper.quorum"),
       table                = journalConfig.getString("table"),
       family               = journalConfig.getString("family"),
@@ -35,7 +39,9 @@ object HBasePersistenceSettings {
       scanBatchSize        = journalConfig.getInt("scan-batch-size"),
       pluginDispatcherId   = journalConfig.getString("plugin-dispatcher"),
       replayDispatcherId   = journalConfig.getString("replay-dispatcher"),
-      publishTestingEvents = journalConfig.getBoolean("publish-testing-events")
+      publishTestingEvents = journalConfig.getBoolean("publish-testing-events"),
+      snapshotHdfsDir      = snapshotConfig.getString("snapshot-dir"),
+      hadoopConfiguration  = HBaseJournalInit.getHBaseConfig(rootConfig)
     )
   }
 }
