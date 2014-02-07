@@ -15,13 +15,19 @@ cp -R scripts/hadoop-conf/* /opt/hadoop-${hadoop_version}/conf/
 # fix ssh access, starting hbase does ssh to localhost
 mv ~/.ssh/id_rsa ~/.ssh/id_rsa.bak
 mv ~/.ssh/id_rsa.pub ~/.ssh/id_rsa.pub.bak
-ssh-keygen -t rsa -C your_email@youremail.com -P '' -f ~/.ssh/id_rsa
-cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
 
-echo "Host localhost
-   StrictHostKeyChecking no
-      BatchMode yes" >> ~/.ssh/config
+if [ ! -f ~/.ssh/id_rsa ]; then
+  echo "Echo, no ~/.ssh/id_rsa, generating new one..."
+  ssh-keygen -t rsa -C your_email@youremail.com -P '' -f ~/.ssh/id_rsa
+  cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
 
-cat ~/.ssh/config
-chmod g-rw,o-rw ~/.ssh/*
+  echo "Host localhost
+    StrictHostKeyChecking no
+    BatchMode yes" >> ~/.ssh/config
+
+  cat ~/.ssh/config
+  chmod g-rw,o-rw ~/.ssh/*
+
+fi
+
 
