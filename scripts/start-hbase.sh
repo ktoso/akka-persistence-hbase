@@ -1,5 +1,3 @@
 #!/bin/sh
 
-cd hbase-0.96.0-hadoop2
-./bin/start-hbase.sh
-
+/opt/hbase-0.94.10/bin/start-hbase.sh
