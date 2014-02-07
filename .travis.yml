@@ -7,6 +7,7 @@ before_install:
 before_script:
   - ./scripts/start-hadoop.sh
   - ./scripts/start-hbase.sh
+  - ./scripts/use-local-hadoop.sh
 after_script:
   - ./scripts/stop-hbase.sh
   - ./scripts/stop-hadoop.sh

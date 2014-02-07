@@ -12,8 +12,7 @@ sudo chown -R `whoami`.`whoami` /opt
 mv ~/.ssh/id_rsa ~/.ssh/id_rsa.bak
 mv ~/.ssh/id_rsa.pub ~/.ssh/id_rsa.pub.bak
 ssh-keygen -t rsa -C your_email@youremail.com -P '' -f ~/.ssh/id_rsa
-cat /home/travis/.ssh/id_rsa.pub >> /home/travis/.ssh/authorized_keys
-ln -s /home/travis/.ssh/authorized_keys /home/travis/.ssh/authorized_keys2
+cat ~/.ssh/id_rsa.pub >> ~/.ssh/authorized_keys
 
 echo "Host localhost
    StrictHostKeyChecking no
