@@ -4,7 +4,8 @@ BUILD_DIR=`pwd`
 
 wget --no-check-certificate http://raw.github.com/fs111/grrrr/master/grrr -O /tmp/grrr && chmod +x /tmp/grrr
 /tmp/grrr /hadoop/common/hadoop-1.2.1/hadoop-1.2.1.tar.gz -O /tmp/hadoop.tar.gz --read-timeout=5 --tries=0
-mkdir -p /opt && tar xf /tmp/hadoop.tar.gz -C /opt
+sodo mkdir -p /opt
+sudo tar xf /tmp/hadoop.tar.gz -C /opt
 
 # fix ssh access, starting hbase does ssh to localhost
 mv ~/.ssh/id_rsa ~/.ssh/id_rsa.bak

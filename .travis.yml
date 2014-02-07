@@ -2,8 +2,11 @@ language: scala
 scala:
   - 2.10.2
 before_install:
- - ./scripts/install-hadoop-for-tests.sh
- - ./scripts/install-hbase-for-tests.sh
+  - ./scripts/install-hadoop-for-tests.sh
+  - ./scripts/install-hbase-for-tests.sh
 before_script:
- - ./scripts/start-hadoop.sh
- - ./scripts/start-hbase.sh
+  - ./scripts/start-hadoop.sh
+  - ./scripts/start-hbase.sh
+after_script:
+  - ./scripts/stop-hbase.sh
+  - ./scripts/stop-hadoop.sh
