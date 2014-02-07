@@ -1,12 +1,16 @@
 #!/bin/bash
 
-BUILD_DIR=`pwd`
+hadoop_version="1.2.1"
 
 wget --no-check-certificate http://raw.github.com/fs111/grrrr/master/grrr -O /tmp/grrr && chmod +x /tmp/grrr
-/tmp/grrr /hadoop/common/hadoop-1.2.1/hadoop-1.2.1.tar.gz -O /tmp/hadoop.tar.gz --read-timeout=5 --tries=0
+/tmp/grrr /hadoop/common/hadoop-${hadoop_version}/hadoop-${hadoop_version}.tar.gz -O /tmp/hadoop.tar.gz --read-timeout=5 --tries=0
 sudo mkdir -p /opt
 sudo tar xf /tmp/hadoop.tar.gz -C /opt
 sudo chown -R `whoami`.`whoami` /opt
+
+# configs, for pseudo dist mode (1 node)
+cp -R scripts/hadoop-conf/* /opt/hadoop-${hadoop_version}/conf/
+
 
 # fix ssh access, starting hbase does ssh to localhost
 mv ~/.ssh/id_rsa ~/.ssh/id_rsa.bak
@@ -20,6 +24,4 @@ echo "Host localhost
 
 cat ~/.ssh/config
 chmod g-rw,o-rw /home/travis/.ssh/*
-
-cd ..
 
