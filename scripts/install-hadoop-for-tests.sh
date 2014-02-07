@@ -13,8 +13,8 @@ cp -R scripts/hadoop-conf/* /opt/hadoop-${hadoop_version}/conf/
 
 
 # fix ssh access, starting hbase does ssh to localhost
-mv ~/.ssh/id_rsa ~/.ssh/id_rsa.bak
-mv ~/.ssh/id_rsa.pub ~/.ssh/id_rsa.pub.bak
+mv ~/.ssh/id_rsa ~/.ssh/id_rsa.bak 2> /dev/null
+mv ~/.ssh/id_rsa.pub ~/.ssh/id_rsa.pub.bak 2> /dev/null
 
 if [ ! -f ~/.ssh/id_rsa ]; then
   echo "Echo, no ~/.ssh/id_rsa, generating new one..."
