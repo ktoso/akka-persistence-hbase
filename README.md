@@ -40,7 +40,7 @@ To activate the _HBase_ snapshot store implementation add the following line to 
 
 ```
 # enable the hadoop-snapshot-store
-akka.persistencesnapshot-store.plugin = "hadoop-snapshot-store"
+akka.persistence.snapshot-store.plugin = "hadoop-snapshot-store"
 
 # and select the snapshotter implementation
 hadoop-snapshot-store {
@@ -55,9 +55,7 @@ plain hadoop command line tooling if needed.
 
 ```
 # enable the hadoop-snapshot-store
-akka.persistencesnapshot-store.plugin = "hadoop-snapshot-store"
-
-**(-; THIS IS NOT IMPLEMENTED YET ;-)**
+akka.persistence.snapshot-store.plugin = "hadoop-snapshot-store"
 
 hadoop-snapshot-store {
   # and select the snapshotter implementation
