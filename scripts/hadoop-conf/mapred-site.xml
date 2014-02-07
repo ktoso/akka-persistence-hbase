@@ -4,7 +4,7 @@
 
     <property>
         <name>mapred.job.tracker</name>
-        <value>127.0.0.1:9001</value>
+        <value>localhost:9001</value>
     </property>
 
 </configuration>

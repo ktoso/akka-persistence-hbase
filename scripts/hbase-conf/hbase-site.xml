@@ -4,12 +4,12 @@
 
     <property>
         <name>hbase.zookeeper.quorum</name>
-        <value>127.0.0.1</value>
+        <value>localhost</value>
     </property>
 
     <property>
         <name>hbase.rootdir</name>
-        <value>hdfs://127.0.0.1:9000/hbase</value>
+        <value>hdfs://localhost:9000/hbase</value>
     </property>
 
     <property>
