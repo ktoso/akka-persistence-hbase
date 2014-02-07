@@ -23,5 +23,5 @@ echo "Host localhost
       BatchMode yes" >> ~/.ssh/config
 
 cat ~/.ssh/config
-chmod g-rw,o-rw /home/travis/.ssh/*
+chmod g-rw,o-rw ~/.ssh/*
 
