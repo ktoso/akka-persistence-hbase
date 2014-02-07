@@ -82,7 +82,7 @@ trait HadoopSnapshotBehavior {
       actor ! MakeSnapshot
 
       // then
-      probe.expectMsg(max = 10.seconds, "making")
+      probe.expectMsg(max = 20.seconds, "making")
       val ok = probe.expectMsgType[SnapshotOk](max = 10.seconds)
       info(s"Snapshot successful: $ok")
     }
@@ -93,7 +93,7 @@ trait HadoopSnapshotBehavior {
       val actor = system.actorOf(Props(classOf[SnapshottingActor], probe.ref, "snap-1"))
 
       // then
-      probe.expectMsg(max = 10.seconds, WasOfferedSnapshot(List("c", "b", "a")))
+      probe.expectMsg(max = 20.seconds, WasOfferedSnapshot(List("c", "b", "a")))
     }
 
     it should "be able to delete a snapshot, so it won't be replayed again" in {
