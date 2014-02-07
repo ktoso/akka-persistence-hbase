@@ -1,5 +1,6 @@
+language: scala
 scala:
-  - "2.10.2"
+  - 2.10.2
 before_install:
  - ./scripts/install-hbase-for-tests.sh
 before_script:
