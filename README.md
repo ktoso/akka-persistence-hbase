@@ -100,5 +100,5 @@ Kudos
 Heads up to _Martin Krasser_ who helped with this project by nice links as well as his [akka-persistence-cassandra](https://github.com/krasserm/akka-persistence-cassandra) plugin and eventsourced.
 
 
-[![Bitdeli Badge](https://d2weczhvl823v0.cloudfront.net/ktoso/akka-persistence-hbase/trend.png)](https://bitdeli.com/free "Bitdeli Badge")
+![Bitdeli Badge](https://d2weczhvl823v0.cloudfront.net/ktoso/akka-persistence-hbase/trend.png)](https://bitdeli.com/free "Bitdeli Badge")
 
