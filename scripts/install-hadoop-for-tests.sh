@@ -1,5 +1,9 @@
 #!/bin/bash
 
+echo "/etc/hosts:"
+cat /etc/hosts
+echo ""
+
 hadoop_version="1.2.1"
 
 wget --no-check-certificate http://raw.github.com/fs111/grrrr/master/grrr -O /tmp/grrr && chmod +x /tmp/grrr
