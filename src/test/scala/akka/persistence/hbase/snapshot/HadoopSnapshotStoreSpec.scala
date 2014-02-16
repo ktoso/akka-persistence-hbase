@@ -82,8 +82,8 @@ trait HadoopSnapshotBehavior {
       actor ! MakeSnapshot
 
       // then
-      probe.expectMsg(max = 20.seconds, "making")
-      val ok = probe.expectMsgType[SnapshotOk](max = 10.seconds)
+      probe.expectMsg(max = 30.seconds, "making")
+      val ok = probe.expectMsgType[SnapshotOk](max = 15.seconds)
       info(s"Snapshot successful: $ok")
     }
 
