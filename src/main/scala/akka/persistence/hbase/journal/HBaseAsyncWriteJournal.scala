@@ -36,7 +36,7 @@ class HBaseAsyncWriteJournal extends Actor with ActorLogging
 
   lazy val family = hBasePersistenceSettings.family
 
-  lazy val hadoopConfig = HBaseJournalInit.getHBaseConfig(config)
+  lazy val hadoopConfig = hBasePersistenceSettings.hadoopConfiguration
 
   lazy val client = HBaseClientFactory.getClient(hBasePersistenceSettings, new PersistenceSettings(config.getConfig("akka.persistence")))
 

@@ -17,7 +17,6 @@ class AsyncJournalTCKSpec extends JournalSpec {
     HBaseJournalInit.createTable(config, settings.table, settings.family)
     HBaseJournalInit.createTable(config, settings.snapshotTable, settings.snapshotFamily)
 
-    HBaseJournalInit.getHBaseConfig(config)
     super.beforeAll()
   }
 

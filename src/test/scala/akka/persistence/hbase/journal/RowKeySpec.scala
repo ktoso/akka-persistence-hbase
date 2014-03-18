@@ -7,7 +7,7 @@ class RowKeySpec extends FlatSpec with Matchers {
 
   behavior of "RowKey"
 
-  implicit val journalConfig = new PersistencePluginSettings(null, null, null, 50, 1, null, null, false, null, null, null, null)
+  implicit val journalConfig = new PersistencePluginSettings(null, null, null, null, 50, 1, null, null, false, null, null, null, null)
 
   it should "find first key in partition" in {
     val rowKeys = for {
