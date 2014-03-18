@@ -15,6 +15,7 @@ import org.apache.hadoop.conf.Configuration
  */
 case class PluginPersistenceSettings(
   zookeeperQuorum: String,
+  zookeeperParent: String,
   table: String,
   family: String,
   partitionCount: Int,
@@ -32,7 +33,8 @@ object PluginPersistenceSettings {
     val snapshotConfig = rootConfig.getConfig("hadoop-snapshot-store")
 
     PluginPersistenceSettings(
-      zookeeperQuorum      = journalConfig.getString("hbase.zookeeper.quorum"),
+      zookeeperQuorum      = journalConfig.getString("hbase.hbase.zookeeper.quorum"),
+      zookeeperParent      = journalConfig.getString("hbase.zookeeper.znode.parent"),
       table                = journalConfig.getString("table"),
       family               = journalConfig.getString("family"),
       partitionCount       = journalConfig.getInt("partition.count"),
