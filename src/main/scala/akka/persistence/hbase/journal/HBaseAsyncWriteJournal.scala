@@ -58,6 +58,7 @@ class HBaseAsyncWriteJournal extends Actor with ActorLogging
     flushWrites()
     Future.sequence(futures) map {
       case _ if publishTestingEvents => context.system.eventStream.publish(FinishedWrites(persistentBatch.size))
+      case _ =>
     }
   }
 

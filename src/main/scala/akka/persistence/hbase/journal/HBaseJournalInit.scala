@@ -53,14 +53,13 @@ object HBaseJournalInit {
    */
   def getHBaseConfig(config: Config): Configuration = {
     val c = new Configuration()
-    @inline def hbaseKey(s: String) = "hbase." + s
 
     val journalConfig = config.getConfig("hbase-journal")
     val hbaseConfig = journalConfig.getConfig("hbase")
 
     // todo does not cover all cases
     hbaseConfig.entrySet().asScala foreach { e =>
-      c.set(hbaseKey(e.getKey), e.getValue.unwrapped.toString)
+      c.set(e.getKey, e.getValue.unwrapped.toString)
     }
     c
   }
