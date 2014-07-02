@@ -27,6 +27,32 @@ object HBaseJournalInit {
     try doInitTable(admin, table, familyName) finally admin.close()
   }
 
+  /**
+   * Disable the journal table (defined as `hbase-journal.table`).
+   */
+  def disableTable(config: Config): Unit = {
+    val conf = getHBaseConfig(config)
+    val admin = new HBaseAdmin(conf)
+
+    val journalConfig = config.getConfig("hbase-journal")
+    val table = journalConfig.getString("table")
+
+    try admin.disableTable(table) finally admin.close()
+  }
+
+  /**
+   * Drop the journal table (defined as `hbase-journal.table`).
+   */
+  def deleteTable(config: Config): Unit = {
+    val conf = getHBaseConfig(config)
+    val admin = new HBaseAdmin(conf)
+
+    val journalConfig = config.getConfig("hbase-journal")
+    val table = journalConfig.getString("table")
+
+    try admin.deleteTable(table) finally admin.close()
+  }
+
   private def doInitTable(admin: HBaseAdmin, tableName: String, familyName: String): Boolean = {
     if (admin.tableExists(tableName)) {
       val tableDesc = admin.getTableDescriptor(toBytes(tableName))

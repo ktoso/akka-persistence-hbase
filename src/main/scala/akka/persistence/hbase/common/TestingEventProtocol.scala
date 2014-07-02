@@ -7,7 +7,7 @@ import akka.persistence.SnapshotSelectionCriteria
  */
 object TestingEventProtocol {
 
-  private[hbase] case class FinishedWrites(written: Int)
+  private[hbase] case class FinishedWrites(written: Long)
 
   private[hbase] case class DeletedSnapshotsFor(persistenceId: String, criteria: SnapshotSelectionCriteria)
 

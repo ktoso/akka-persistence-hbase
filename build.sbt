@@ -6,11 +6,17 @@ version := "0.4-SNAPSHOT"
 
 scalaVersion := "2.11.0"
 
-crossScalaVersions += "2.10.4"
+crossScalaVersions := Seq("2.10.4", "2.11.0")
 
-val akkaVersion = "2.3.4"
+parallelExecution in Test := false
+
+// dependencies ---------------------------------------------------------------
 
 resolvers += "akka snapshots" at "http://repo.akka.io/snapshots"
+
+resolvers += "krasserm at bintray" at "http://dl.bintray.com/krasserm/maven"
+
+val akkaVersion = "2.3.4"
 
 libraryDependencies += "org.apache.hadoop" % "hadoop-core"   % "1.1.2"
 
@@ -22,18 +28,17 @@ libraryDependencies += ("org.hbase"        % "asynchbase"    % "1.4.1")
   .exclude("org.slf4j", "log4j-over-slf4j")
   .exclude("org.slf4j", "jcl-over-slf4j")
 
-libraryDependencies += "org.slf4j"         % "slf4j-log4j12" % "1.6.0" % "provided"
+libraryDependencies += "org.slf4j"            % "slf4j-log4j12"                 % "1.6.0"     % "provided"
 
-libraryDependencies += "com.typesafe.akka" %% "akka-persistence-experimental" % akkaVersion % "compile"
+libraryDependencies += "com.typesafe.akka"   %% "akka-persistence-experimental" % akkaVersion % "compile"
 
-libraryDependencies += "com.typesafe.akka" %% "akka-testkit"       % akkaVersion % "test"
+libraryDependencies += "com.typesafe.akka"   %% "akka-testkit"                  % akkaVersion % "test"
 
-libraryDependencies += "org.scalatest"     %% "scalatest"          % "2.2.0"     % "test"
+libraryDependencies += "com.github.krasserm" %% "akka-persistence-testkit"      % "0.3.3"     % "test"
 
+libraryDependencies += "org.scalatest"       %% "scalatest"                     % "2.2.0"     % "test"
 
-parallelExecution in Test := false
-
-// publishing settings
+// publishing settings --------------------------------------------------------
 
 publishMavenStyle := true
 
