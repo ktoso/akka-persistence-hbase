@@ -10,8 +10,8 @@ class HadoopSnapshotStore extends SnapshotStore with ActorLogging {
 
   val snap = HadoopSnapshotterExtensionId(context.system)
 
-  def loadAsync(processorId: String, criteria: SnapshotSelectionCriteria): Future[Option[SelectedSnapshot]] =
-    snap.loadAsync(processorId, criteria)
+  def loadAsync(persistenceId: String, criteria: SnapshotSelectionCriteria): Future[Option[SelectedSnapshot]] =
+    snap.loadAsync(persistenceId, criteria)
 
   def saveAsync(metadata: SnapshotMetadata, snapshot: Any): Future[Unit] =
     snap.saveAsync(metadata, snapshot)
@@ -22,6 +22,6 @@ class HadoopSnapshotStore extends SnapshotStore with ActorLogging {
   def delete(metadata: SnapshotMetadata): Unit =
     snap.delete(metadata)
 
-  def delete(processorId: String, criteria: SnapshotSelectionCriteria): Unit =
-    snap.delete(processorId, criteria)
+  def delete(persistenceId: String, criteria: SnapshotSelectionCriteria): Unit =
+    snap.delete(persistenceId, criteria)
 }

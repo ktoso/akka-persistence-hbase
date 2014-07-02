@@ -2,11 +2,13 @@ organization := "pl.project13.scala"
 
 name := "akka-persistence-hbase"
 
-version := "0.3"
+version := "0.4-SNAPSHOT"
 
-scalaVersion := "2.10.2"
+scalaVersion := "2.11.0"
 
-val akkaVersion = "2.3-SNAPSHOT"
+crossScalaVersions += "2.10.4"
+
+val akkaVersion = "2.3.4"
 
 resolvers += "akka snapshots" at "http://repo.akka.io/snapshots"
 
@@ -20,13 +22,13 @@ libraryDependencies += ("org.hbase"        % "asynchbase"    % "1.4.1")
   .exclude("org.slf4j", "log4j-over-slf4j")
   .exclude("org.slf4j", "jcl-over-slf4j")
 
-libraryDependencies += "org.slf4j"         % "slf4j-log4j12" % "1.6.0"
+libraryDependencies += "org.slf4j"         % "slf4j-log4j12" % "1.6.0" % "provided"
 
 libraryDependencies += "com.typesafe.akka" %% "akka-persistence-experimental" % akkaVersion % "compile"
 
 libraryDependencies += "com.typesafe.akka" %% "akka-testkit"       % akkaVersion % "test"
 
-libraryDependencies += "org.scalatest"     %% "scalatest"          % "2.0"       % "test"
+libraryDependencies += "org.scalatest"     %% "scalatest"          % "2.2.0"     % "test"
 
 
 parallelExecution in Test := false

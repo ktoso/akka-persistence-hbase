@@ -31,9 +31,9 @@ class HdfsSnapshotter(val system: ActorSystem, settings: PluginPersistenceSettin
   /** Snapshots we're in progress of saving */
   private var saving = immutable.Set.empty[SnapshotMetadata]
 
-  def loadAsync(processorId: String, criteria: SnapshotSelectionCriteria): Future[Option[SelectedSnapshot]] = {
-    log.info("[HDFS] Loading async, for processorId {}, criteria: {}", processorId, criteria)
-    val snapshotMetas = listSnapshots(settings.snapshotHdfsDir, processorId)
+  def loadAsync(persistenceId: String, criteria: SnapshotSelectionCriteria): Future[Option[SelectedSnapshot]] = {
+    log.info("[HDFS] Loading async, for persistenceId {}, criteria: {}", persistenceId, criteria)
+    val snapshotMetas = listSnapshots(settings.snapshotHdfsDir, persistenceId)
 
     @tailrec def deserializeOrTryOlder(metas: List[HdfsSnapshotDescriptor]): Option[SelectedSnapshot] = metas match {
       case Nil =>
@@ -42,7 +42,7 @@ class HdfsSnapshotter(val system: ActorSystem, settings: PluginPersistenceSettin
       case desc :: tail =>
         tryLoadingSnapshot(desc) match {
           case Success(snapshot) =>
-            Some(SelectedSnapshot(SnapshotMetadata(processorId, desc.seqNumber), snapshot))
+            Some(SelectedSnapshot(SnapshotMetadata(persistenceId, desc.seqNumber), snapshot))
 
           case Failure(ex) =>
             log.error(s"Failed to deserialize snapshot for $desc" + (if (tail.nonEmpty) ", trying previous one" else ""), ex)
@@ -73,8 +73,8 @@ class HdfsSnapshotter(val system: ActorSystem, settings: PluginPersistenceSettin
     saving -= meta
   }
 
-  def delete(processorId: String, criteria: SnapshotSelectionCriteria) {
-    val toDelete = listSnapshots(settings.snapshotHdfsDir, processorId).dropWhile(_.seqNumber > criteria.maxSequenceNr)
+  def delete(persistenceId: String, criteria: SnapshotSelectionCriteria) {
+    val toDelete = listSnapshots(settings.snapshotHdfsDir, persistenceId).dropWhile(_.seqNumber > criteria.maxSequenceNr)
 
     toDelete foreach { desc =>
       val path = new Path(settings.snapshotHdfsDir, desc.toFilename)
@@ -85,10 +85,10 @@ class HdfsSnapshotter(val system: ActorSystem, settings: PluginPersistenceSettin
   // internals --------
 
   /**
-   * Looks for snapshots stored in directory for given `processorId`.
+   * Looks for snapshots stored in directory for given `persistenceId`.
    * Guarantees that the returned list is sorted descending by the snapshots `seqNumber` (latest snapshot first).
    */
-  private def listSnapshots(snapshotDir: String, processorId: String): List[HdfsSnapshotDescriptor] = {
+  private def listSnapshots(snapshotDir: String, persistenceId: String): List[HdfsSnapshotDescriptor] = {
     val descs = fs.listStatus(new Path(snapshotDir)) flatMap { HdfsSnapshotDescriptor.from }
     descs.sortBy(_.seqNumber).toList
   }
@@ -114,19 +114,19 @@ class HdfsSnapshotter(val system: ActorSystem, settings: PluginPersistenceSettin
 
   private def newHdfsPath(desc: HdfsSnapshotDescriptor) = new Path(settings.snapshotHdfsDir, desc.toFilename)
 
-  case class HdfsSnapshotDescriptor(processorId: String, seqNumber: Long, timestamp: Long) {
-    def toFilename = s"snapshot-$processorId-$seqNumber-$timestamp"
+  case class HdfsSnapshotDescriptor(persistenceId: String, seqNumber: Long, timestamp: Long) {
+    def toFilename = s"snapshot-$persistenceId-$seqNumber-$timestamp"
   }
   object HdfsSnapshotDescriptor {
     val SnapshotNamePattern = """snapshot-([a-zA-Z0-9]+)-([0-9]+)-([0-9]+)""".r
 
     def apply(meta: SnapshotMetadata): HdfsSnapshotDescriptor =
-      HdfsSnapshotDescriptor(meta.processorId, meta.sequenceNr, meta.timestamp)
+      HdfsSnapshotDescriptor(meta.persistenceId, meta.sequenceNr, meta.timestamp)
 
     def from(status: FileStatus): Option[HdfsSnapshotDescriptor] =
       FilenameUtils.getBaseName(status.getPath.toString) match {
-        case SnapshotNamePattern(processorId, seqNumber, timestamp) =>
-          Some(HdfsSnapshotDescriptor(processorId, seqNumber.toLong, timestamp.toLong))
+        case SnapshotNamePattern(persistenceId, seqNumber, timestamp) =>
+          Some(HdfsSnapshotDescriptor(persistenceId, seqNumber.toLong, timestamp.toLong))
 
         case _ =>
           None

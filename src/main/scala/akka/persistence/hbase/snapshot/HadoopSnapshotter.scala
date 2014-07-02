@@ -15,7 +15,7 @@ trait HadoopSnapshotter extends Extension {
   def system: ActorSystem
   protected val serialization = SerializationExtension(system)
 
-  def loadAsync(processorId: String, criteria: SnapshotSelectionCriteria): Future[Option[SelectedSnapshot]]
+  def loadAsync(persistenceId: String, criteria: SnapshotSelectionCriteria): Future[Option[SelectedSnapshot]]
 
   def saveAsync(meta: SnapshotMetadata, snapshot: Any): Future[Unit]
 
@@ -23,7 +23,7 @@ trait HadoopSnapshotter extends Extension {
 
   def delete(metadata: SnapshotMetadata): Unit
 
-  def delete(processorId: String, criteria: SnapshotSelectionCriteria): Unit
+  def delete(persistenceId: String, criteria: SnapshotSelectionCriteria): Unit
 
   protected def deserialize(bytes: Array[Byte]): Try[Snapshot] =
     serialization.deserialize(bytes, classOf[Snapshot])

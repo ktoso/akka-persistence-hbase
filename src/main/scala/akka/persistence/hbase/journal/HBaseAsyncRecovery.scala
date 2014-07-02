@@ -1,15 +1,17 @@
 package akka.persistence.hbase.journal
 
-import akka.persistence.PersistentRepr
-import akka.actor.{ActorLogging, Actor}
-import scala.concurrent.Future
-import org.hbase.async.{KeyValue, HBaseClient}
 import java.{util => ju}
-import scala.collection.mutable
-import org.apache.hadoop.hbase.util.Bytes
+
+import akka.actor.{Actor, ActorLogging}
+import akka.persistence.PersistentRepr
+import akka.persistence.hbase.common.RowKey
 import akka.persistence.journal._
-import akka.persistence.hbase.common.{Columns, RowKey, DeferredConversions}
+import org.apache.hadoop.hbase.util.Bytes
+import org.hbase.async.{HBaseClient, KeyValue}
+
 import scala.annotation.switch
+import scala.collection.mutable
+import scala.concurrent.Future
 
 trait HBaseAsyncRecovery extends AsyncRecovery {
   this: Actor with ActorLogging with HBaseAsyncWriteJournal =>
@@ -22,22 +24,23 @@ trait HBaseAsyncRecovery extends AsyncRecovery {
 
   override implicit val executionContext = context.system.dispatchers.lookup(replayDispatcherId)
 
-  import Columns._
-  import RowTypeMarkers._
-  import DeferredConversions._
-  import collection.JavaConverters._
+  import akka.persistence.hbase.common.Columns._
+  import akka.persistence.hbase.common.DeferredConversions._
+  import akka.persistence.hbase.journal.RowTypeMarkers._
+
+import scala.collection.JavaConverters._
 
   // async recovery plugin impl
 
   // todo can be improved to to N parallel scans for each "partition" we created, instead of one "big scan"
-  override def asyncReplayMessages(processorId: String, fromSequenceNr: Long, toSequenceNr: Long, max: Long)
+  override def asyncReplayMessages(persistenceId: String, fromSequenceNr: Long, toSequenceNr: Long, max: Long)
                                   (replayCallback: PersistentRepr => Unit): Future[Unit] = {
-    log.debug(s"Async replay for processorId [$processorId], from sequenceNr: [$fromSequenceNr], to sequenceNr: [$toSequenceNr]")
+    log.debug(s"Async replay for persistenceId [$persistenceId], from sequenceNr: [$fromSequenceNr], to sequenceNr: [$toSequenceNr]")
 
     val scanner = newScanner()
-    scanner.setStartKey(RowKey(processorId, fromSequenceNr).toBytes)
-    scanner.setStopKey(RowKey(processorId, toSequenceNr).toBytes)
-    scanner.setKeyRegexp(RowKey.patternForProcessor(processorId))
+    scanner.setStartKey(RowKey(persistenceId, fromSequenceNr).toBytes)
+    scanner.setStopKey(RowKey(persistenceId, toSequenceNr).toBytes)
+    scanner.setKeyRegexp(RowKey.patternForProcessor(persistenceId))
 
     scanner.setMaxNumRows(hBasePersistenceSettings.scanBatchSize)
 
@@ -68,12 +71,12 @@ trait HBaseAsyncRecovery extends AsyncRecovery {
   }
 
   // todo make this multiple scans, on each partition instead of one big scan
-  override def asyncReadHighestSequenceNr(processorId: String, fromSequenceNr: Long): Future[Long] = {
-    log.debug(s"Async read for highest sequence number for processorId: [$processorId] (hint, seek from  nr: [$fromSequenceNr])")
+  override def asyncReadHighestSequenceNr(persistenceId: String, fromSequenceNr: Long): Future[Long] = {
+    log.debug(s"Async read for highest sequence number for persistenceId: [$persistenceId] (hint, seek from  nr: [$fromSequenceNr])")
 
     val scanner = newScanner()
-    scanner.setStartKey(RowKey(processorId, fromSequenceNr).toBytes)
-    scanner.setKeyRegexp(RowKey.patternForProcessor(processorId))
+    scanner.setStartKey(RowKey(persistenceId, fromSequenceNr).toBytes)
+    scanner.setKeyRegexp(RowKey.patternForProcessor(persistenceId))
 
     def handleRows(in: AnyRef): Future[Long] = in match {
       case null =>

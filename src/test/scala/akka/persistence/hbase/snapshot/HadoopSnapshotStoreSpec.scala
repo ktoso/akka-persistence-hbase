@@ -1,24 +1,20 @@
 package akka.persistence.hbase.snapshot
 
-import akka.testkit.{TestKit, ImplicitSender, TestProbe}
-import akka.actor.{ActorLogging, Props, ActorRef, ActorSystem}
-import org.scalatest.{BeforeAndAfterAll, FlatSpecLike, DoNotDiscover}
+import akka.actor.{ActorLogging, ActorRef, ActorSystem, Props}
 import akka.persistence._
 import akka.persistence.hbase.journal.{HBaseClientFactory, HBaseJournalInit}
+import akka.testkit.{TestKit, TestProbe}
+import com.typesafe.config.{Config, ConfigFactory}
 import org.apache.hadoop.hbase.client.HBaseAdmin
-import concurrent.duration._
-import akka.persistence.SaveSnapshotFailure
-import akka.persistence.SaveSnapshotSuccess
-import akka.persistence.SnapshotMetadata
-import com.typesafe.config.{ConfigFactory, Config}
+import org.scalatest.{BeforeAndAfterAll, FlatSpecLike}
+
+import scala.concurrent.duration._
 
 object HadoopSnapshotStoreSpec {
-  class SnapshottingActor(probe: ActorRef, override val processorId: String) extends Processor with ActorLogging {
+  class SnapshottingActor(probe: ActorRef, override val persistenceId: String) extends PersistentActor with ActorLogging {
     var data = List[String]()
 
-    def receive = {
-      // snapshot making ------------------------------------------------------
-
+    val takingSnapshots: Receive = {
       case x: String =>
         log.info("Prepending: " + x)
         data ::= x
@@ -35,22 +31,23 @@ object HadoopSnapshotStoreSpec {
       case SaveSnapshotFailure(meta, reason) =>
         log.info("failure: " + meta)
         probe ! SnapshotFail(meta, reason)
+    }
 
-      // end of snapshot making -----------------------------------------------
-
-      // snapshot offers ------------------------------------------------------
-
+    val snapshotOffers: Receive = {
       case SnapshotOffer(metadata, offeredSnapshot) =>
         log.info("Offer: " + metadata + ", data: " + offeredSnapshot)
         data = offeredSnapshot.asInstanceOf[List[String]]
         probe ! WasOfferedSnapshot(data)
-      
+
       case DeleteSnapshot(toSeqNr) =>
         log.info("Delete, to: " + toSeqNr)
         deleteSnapshot(toSeqNr, System.currentTimeMillis())
-
-      // end of snapshot offers ------------------------------------------------
     }
+
+    override def receiveCommand = takingSnapshots orElse snapshotOffers
+
+    override def receiveRecover = receiveCommand
+
   }
 
   case object MakeSnapshot
@@ -66,7 +63,7 @@ trait HadoopSnapshotBehavior {
 
   def config: Config
 
-  import HadoopSnapshotStoreSpec._
+  import akka.persistence.hbase.snapshot.HadoopSnapshotStoreSpec._
 
   val hadoopSnapshotStore = {
 

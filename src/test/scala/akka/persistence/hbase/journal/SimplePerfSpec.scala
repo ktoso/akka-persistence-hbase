@@ -11,14 +11,21 @@ import akka.persistence.hbase.common.TestingEventProtocol._
 
 object SimplePerfSpec {
 
-  class Writer(Until: Int, override val processorId: String) extends Processor {
+  class Writer(untilSeqNr: Int, override val persistenceId: String) extends PersistentActor {
 
-    def receive = {
-      case Persistent(payload, sequenceNr) =>
+    def receiveCommand = {
+      case payload if lastSequenceNr != untilSeqNr =>
+        persist(payload) { p => }
+        // do nothing...
 
-      case Persistent(payload, Until) =>
-        context.system.eventStream.publish (FinishedWrites(Until))
-        sender ! FinishedWrites(Until)
+      case payload =>
+        context.system.eventStream.publish (FinishedWrites(untilSeqNr))
+        sender ! FinishedWrites(untilSeqNr)
+    }
+
+    override def receiveRecover: Receive = {
+      case m =>
+        println("recover: " + m)
     }
   }
 
@@ -45,7 +52,7 @@ class SimplePerfSpec extends TestKit(ActorSystem("test")) with FlatSpecLike
     val probe = TestProbe()
     system.eventStream.subscribe(probe.ref, classOf[FinishedWrites])
 
-    val msg = Persistent("Hello!")
+    val msg = "Hello!"
 
     val writer = system.actorOf(Props(classOf[Writer], messagesNr, "w-1"))
 

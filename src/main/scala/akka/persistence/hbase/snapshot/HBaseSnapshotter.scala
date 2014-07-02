@@ -34,17 +34,17 @@ class HBaseSnapshotter(val system: ActorSystem, val hBasePersistenceSettings: Pl
   import Columns._
   import RowTypeMarkers._
 
-  def loadAsync(processorId: String, criteria: SnapshotSelectionCriteria): Future[Option[SelectedSnapshot]] = {
-    log.debug("Loading async for processorId: [{}] on criteria: {}", processorId, criteria)
+  def loadAsync(persistenceId: String, criteria: SnapshotSelectionCriteria): Future[Option[SelectedSnapshot]] = {
+    log.debug("Loading async for persistenceId: [{}] on criteria: {}", persistenceId, criteria)
     val scanner = newScanner()
     val SnapshotSelectionCriteria(maxSequenceNr, maxTimestamp) = criteria
 
-    val start = RowKey.firstForProcessor(processorId)
-    val stop = RowKey(processorId, maxSequenceNr)
+    val start = RowKey.firstForProcessor(persistenceId)
+    val stop = RowKey(persistenceId, maxSequenceNr)
 
     scanner.setStartKey(start.toBytes)
     scanner.setStopKey(stop.toBytes)
-    scanner.setKeyRegexp(RowKey.patternForProcessor(processorId))
+    scanner.setKeyRegexp(RowKey.patternForProcessor(persistenceId))
 
     val promise = Promise[Option[SelectedSnapshot]]()
 
@@ -52,7 +52,7 @@ class HBaseSnapshotter(val system: ActorSystem, val hBasePersistenceSettings: Pl
       case null =>
         promise trySuccess None // got to end of Scan, if nothing completed, we complete with "found no valid snapshot"
         scanner.close()
-        log.debug("Finished async load for processorId: [{}] on criteria: {}", processorId, criteria)
+        log.debug("Finished async load for persistenceId: [{}] on criteria: {}", persistenceId, criteria)
 
       case rows: AsyncBaseRows =>
         val maybeSnapshot: Option[(Long, Snapshot)] = for {
@@ -64,7 +64,7 @@ class HBaseSnapshotter(val system: ActorSystem, val hBasePersistenceSettings: Pl
 
         maybeSnapshot match {
           case Some((seqNr, snapshot)) =>
-            val selectedSnapshot = SelectedSnapshot(SnapshotMetadata(processorId, seqNr), snapshot.data)
+            val selectedSnapshot = SelectedSnapshot(SnapshotMetadata(persistenceId, seqNr), snapshot.data)
             promise success Some(selectedSnapshot)
 
           case None =>
@@ -85,7 +85,7 @@ class HBaseSnapshotter(val system: ActorSystem, val hBasePersistenceSettings: Pl
     serialize(Snapshot(snapshot)) match {
       case Success(serializedSnapshot) =>
         executePut(
-          RowKey(meta.processorId, meta.sequenceNr).toBytes,
+          RowKey(meta.persistenceId, meta.sequenceNr).toBytes,
           Array(Marker,              Message),
           Array(SnapshotMarkerBytes, serializedSnapshot)
         )
@@ -103,20 +103,20 @@ class HBaseSnapshotter(val system: ActorSystem, val hBasePersistenceSettings: Pl
   def delete(meta: SnapshotMetadata): Unit = {
     log.debug("Deleting: {}", meta)
     saving -= meta
-    executeDelete(RowKey(meta.processorId, meta.sequenceNr).toBytes)
+    executeDelete(RowKey(meta.persistenceId, meta.sequenceNr).toBytes)
   }
 
-  def delete(processorId: String, criteria: SnapshotSelectionCriteria): Unit = {
-    log.debug("Deleting processorId: [{}], criteria: {}", processorId, criteria)
+  def delete(persistenceId: String, criteria: SnapshotSelectionCriteria): Unit = {
+    log.debug("Deleting persistenceId: [{}], criteria: {}", persistenceId, criteria)
 
     val scanner = newScanner()
 
-    val start = RowKey.firstForProcessor(processorId)
-    val stop = RowKey(processorId, criteria.maxSequenceNr)
+    val start = RowKey.firstForProcessor(persistenceId)
+    val stop = RowKey(persistenceId, criteria.maxSequenceNr)
 
     scanner.setStartKey(start.toBytes)
     scanner.setStopKey(stop.toBytes)
-    scanner.setKeyRegexp(RowKey.patternForProcessor(processorId))
+    scanner.setKeyRegexp(RowKey.patternForProcessor(persistenceId))
 
     def handleRows(in: AnyRef): Future[Unit] = in match {
       case null =>
@@ -138,7 +138,7 @@ class HBaseSnapshotter(val system: ActorSystem, val hBasePersistenceSettings: Pl
     def go(): Future[Unit] = scanner.nextRows() flatMap handleRows
 
     go() map {
-      case _ if settings.publishTestingEvents => system.eventStream.publish(DeletedSnapshotsFor(processorId, criteria))
+      case _ if settings.publishTestingEvents => system.eventStream.publish(DeletedSnapshotsFor(persistenceId, criteria))
     }
   }
 

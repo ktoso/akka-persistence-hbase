@@ -9,6 +9,6 @@ object TestingEventProtocol {
 
   private[hbase] case class FinishedWrites(written: Int)
 
-  private[hbase] case class DeletedSnapshotsFor(processorId: String, criteria: SnapshotSelectionCriteria)
+  private[hbase] case class DeletedSnapshotsFor(persistenceId: String, criteria: SnapshotSelectionCriteria)
 
 }

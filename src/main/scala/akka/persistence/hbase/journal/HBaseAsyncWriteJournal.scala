@@ -1,14 +1,12 @@
 package akka.persistence.hbase.journal
 
-import akka.persistence.journal.AsyncWriteJournal
-import akka.persistence.{PersistenceSettings, PersistentConfirmation, PersistentId, PersistentRepr}
-import scala.concurrent._
 import akka.actor.{Actor, ActorLogging}
-import org.apache.hadoop.hbase.util.Bytes
-import scala.collection.immutable
-import akka.serialization.SerializationExtension
-import akka.persistence.hbase.common.{RowKey, DeferredConversions}
 import akka.persistence.hbase.common._
+import akka.persistence.journal.AsyncWriteJournal
+import akka.persistence.{PersistentConfirmation, PersistenceSettings, PersistentId, PersistentRepr}
+
+import scala.collection.immutable
+import scala.concurrent._
 
 /**
  * Asyncronous HBase Journal.
@@ -19,8 +17,8 @@ class HBaseAsyncWriteJournal extends Actor with ActorLogging
   with HBaseJournalBase with AsyncWriteJournal
   with HBaseAsyncRecovery {
 
-  import RowTypeMarkers._
-  import TestingEventProtocol._
+  import akka.persistence.hbase.common.TestingEventProtocol._
+  import akka.persistence.hbase.journal.RowTypeMarkers._
 
   private lazy val config = context.system.settings.config
 
@@ -35,10 +33,11 @@ class HBaseAsyncWriteJournal extends Actor with ActorLogging
   implicit override val executionContext = context.system.dispatchers.lookup(hBasePersistenceSettings.pluginDispatcherId)
 
 
-  import Bytes._
-  import Columns._
-  import DeferredConversions._
-  import collection.JavaConverters._
+  import akka.persistence.hbase.common.Columns._
+  import akka.persistence.hbase.common.DeferredConversions._
+  import org.apache.hadoop.hbase.util.Bytes._
+
+import scala.collection.JavaConverters._
 
   // journal plugin api impl -------------------------------------------------------------------------------------------
 
@@ -49,9 +48,9 @@ class HBaseAsyncWriteJournal extends Actor with ActorLogging
       import p._
       
       executePut(
-        RowKey(processorId, sequenceNr).toBytes,
-        Array(ProcessorId,          SequenceNr,          Marker,                  Message),
-        Array(toBytes(processorId), toBytes(sequenceNr), toBytes(AcceptedMarker), persistentToBytes(p))
+        RowKey(persistenceId, sequenceNr).toBytes,
+        Array(PersistenceId,          SequenceNr,          Marker,                  Message),
+        Array(toBytes(persistenceId), toBytes(sequenceNr), toBytes(AcceptedMarker), persistentToBytes(p))
       )
     }
 
@@ -65,7 +64,7 @@ class HBaseAsyncWriteJournal extends Actor with ActorLogging
     log.debug(s"AsyncWriteConfirmations for ${confirmations.size} messages")
 
     val fs = confirmations map { confirm =>
-      confirmAsync(confirm.processorId, confirm.sequenceNr, confirm.channelId)
+      confirmAsync(confirm.persistenceId, confirm.sequenceNr, confirm.channelId)
     }
 
     flushWrites()
@@ -79,21 +78,21 @@ class HBaseAsyncWriteJournal extends Actor with ActorLogging
 
     val deleteFutures = for {
       messageId <- messageIds
-      rowId = RowKey(messageId.processorId, messageId.sequenceNr)
+      rowId = RowKey(messageId.persistenceId, messageId.sequenceNr)
     } yield doDelete(rowId.toBytes)
 
     flushWrites()
     Future.sequence(deleteFutures)
   }
 
-  override def asyncDeleteMessagesTo(processorId: String, toSequenceNr: Long, permanent: Boolean): Future[Unit] = {
-    log.debug(s"AsyncDeleteMessagesTo for processorId: $processorId to sequenceNr: $toSequenceNr, premanent: $permanent")
+  override def asyncDeleteMessagesTo(persistenceId: String, toSequenceNr: Long, permanent: Boolean): Future[Unit] = {
+    log.debug(s"AsyncDeleteMessagesTo for persistenceId: $persistenceId to sequenceNr: $toSequenceNr, premanent: $permanent")
     val doDelete = deleteFunctionFor(permanent)
 
     val scanner = newScanner()
-    scanner.setStartKey(RowKey.firstForProcessor(processorId).toBytes)
-    scanner.setStopKey(RowKey(processorId, toSequenceNr).toBytes)
-    scanner.setKeyRegexp(RowKey.patternForProcessor(processorId))
+    scanner.setStartKey(RowKey.firstForProcessor(persistenceId).toBytes)
+    scanner.setStopKey(RowKey(persistenceId, toSequenceNr).toBytes)
+    scanner.setKeyRegexp(RowKey.patternForProcessor(persistenceId))
 
     def handleRows(in: AnyRef): Future[Unit] = in match {
       case null =>
@@ -117,11 +116,11 @@ class HBaseAsyncWriteJournal extends Actor with ActorLogging
 
   // end of journal plugin api impl ------------------------------------------------------------------------------------
 
-  def confirmAsync(processorId: String, sequenceNr: Long, channelId: String): Future[Unit] = {
-      log.debug(s"Confirming async for processorId: $processorId, sequenceNr: $sequenceNr and channelId: $channelId")
+  def confirmAsync(persistenceId: String, sequenceNr: Long, channelId: String): Future[Unit] = {
+      log.debug(s"Confirming async for persistenceId: $persistenceId, sequenceNr: $sequenceNr and channelId: $channelId")
 
       executePut(
-        RowKey(processorId, sequenceNr).toBytes,
+        RowKey(persistenceId, sequenceNr).toBytes,
         Array(Marker),
         Array(confirmedMarkerBytes(channelId))
       )
