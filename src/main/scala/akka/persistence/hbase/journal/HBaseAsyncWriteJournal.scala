@@ -42,7 +42,7 @@ import scala.collection.JavaConverters._
   // journal plugin api impl -------------------------------------------------------------------------------------------
 
   override def asyncWriteMessages(persistentBatch: immutable.Seq[PersistentRepr]): Future[Unit] = {
-    log.debug(s"Write async for ${persistentBatch.size} presistent messages")
+    log.debug(s"Write async for {} presistent messages", persistentBatch.size)
 
     val futures = persistentBatch map { p =>
       import p._
@@ -72,7 +72,7 @@ import scala.collection.JavaConverters._
   }
 
   override def asyncDeleteMessages(messageIds: immutable.Seq[PersistentId], permanent: Boolean): Future[Unit] = {
-    log.debug(s"Async delete [${messageIds.size}] messages, premanent: $permanent")
+    log.debug(s"Async delete [{}] messages, premanent: {}", messageIds.size, permanent)
 
     val doDelete = deleteFunctionFor(permanent)
 
@@ -86,7 +86,7 @@ import scala.collection.JavaConverters._
   }
 
   override def asyncDeleteMessagesTo(persistenceId: String, toSequenceNr: Long, permanent: Boolean): Future[Unit] = {
-    log.debug(s"AsyncDeleteMessagesTo for persistenceId: $persistenceId to sequenceNr: $toSequenceNr, premanent: $permanent")
+    log.debug(s"AsyncDeleteMessagesTo for persistenceId: {} to sequenceNr: {}, premanent: {}", persistenceId, toSequenceNr, permanent)
     val doDelete = deleteFunctionFor(permanent)
 
     val scanner = newScanner()
@@ -111,13 +111,19 @@ import scala.collection.JavaConverters._
     }
 
     def go() = scanner.nextRows() flatMap handleRows
-    go()
+
+    val fAll = go()
+    fAll onComplete { case _ =>
+      log.debug("Finished deleting messages for persistenceId: {}, to sequenceNr: {}, permanent: {}", persistenceId, toSequenceNr, permanent)
+      context.system.eventStream.publish(FinishedDeletes(toSequenceNr))
+    }
+    fAll
   }
 
   // end of journal plugin api impl ------------------------------------------------------------------------------------
 
   def confirmAsync(persistenceId: String, sequenceNr: Long, channelId: String): Future[Unit] = {
-      log.debug(s"Confirming async for persistenceId: $persistenceId, sequenceNr: $sequenceNr and channelId: $channelId")
+      log.debug(s"Confirming async for persistenceId: {}, sequenceNr: {} and channelId: {}", persistenceId, sequenceNr, channelId)
 
       executePut(
         RowKey(persistenceId, sequenceNr).toBytes,

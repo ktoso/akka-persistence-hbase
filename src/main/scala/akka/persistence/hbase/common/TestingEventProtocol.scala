@@ -9,6 +9,8 @@ object TestingEventProtocol {
 
   private[hbase] case class FinishedWrites(written: Long)
 
+  private[hbase] case class FinishedDeletes(toSequenceNr: Long)
+
   private[hbase] case class DeletedSnapshotsFor(persistenceId: String, criteria: SnapshotSelectionCriteria)
 
 }

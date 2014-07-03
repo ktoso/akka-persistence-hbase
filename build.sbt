@@ -18,13 +18,19 @@ resolvers += "krasserm at bintray" at "http://dl.bintray.com/krasserm/maven"
 
 val akkaVersion = "2.3.4"
 
-libraryDependencies += "org.apache.hadoop" % "hadoop-core"   % "1.1.2"
+val hadoopVersion = "1.2.1"
 
-libraryDependencies += "org.apache.hadoop" % "hadoop-client" % "1.1.2"
+val hbaseVersion = "0.98.3-hadoop1"
 
-libraryDependencies += "org.apache.hbase"  % "hbase"         % "0.94.6.1" % "compile"
+libraryDependencies += "org.apache.hadoop" % "hadoop-core"   % hadoopVersion
 
-libraryDependencies += ("org.hbase"        % "asynchbase"    % "1.4.1")
+libraryDependencies += "org.apache.hadoop" % "hadoop-client" % hadoopVersion
+
+libraryDependencies += "org.apache.hbase"  % "hbase-common"  % hbaseVersion % "compile"
+
+libraryDependencies += "org.apache.hbase"  % "hbase-client"  % hbaseVersion % "compile"
+
+libraryDependencies += ("org.hbase"        % "asynchbase"    % "1.5.0")
   .exclude("org.slf4j", "log4j-over-slf4j")
   .exclude("org.slf4j", "jcl-over-slf4j")
 

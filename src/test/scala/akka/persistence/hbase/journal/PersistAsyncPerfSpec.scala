@@ -5,7 +5,8 @@ import java.util.concurrent.TimeUnit
 
 import akka.actor.{ActorLogging, ActorRef, ActorSystem, Props}
 import akka.persistence._
-import akka.testkit.{ImplicitSender, TestKit}
+import akka.persistence.hbase.common.TestingEventProtocol.FinishedDeletes
+import akka.testkit.{ImplicitSender, TestKit, TestProbe}
 import com.google.common.base.Stopwatch
 import org.scalatest.{BeforeAndAfterAll, FlatSpecLike, Matchers}
 
@@ -30,20 +31,23 @@ object PersistAsyncPerfSpec {
       case "boom" =>
         throw new RuntimeException("Boom!")
 
-      case payload =>
+      case payload: AnyRef =>
         persistAsync(payload)(handlePersisted)
     }
 
-    def handlePersisted(p: Any): Unit = {
+    def handlePersisted(p: AnyRef): Unit = {
       log.debug(s"persisted: {} @ {}", p, lastSequenceNr)
       if (!recoveryRunning)
         sender() ! s"p-$p"
-      
-      lastPersisted = p
+
+      p match {
+        case _: String => lastPersisted = p
+        case RecoveryCompleted => context.system.eventStream.publish(p)
+      }
     }
 
     override def receiveRecover: Receive = {
-      case m => log.info("recover: " + m)
+      case m: AnyRef => handlePersisted(m)
     }
   }
 
@@ -84,33 +88,32 @@ class PersistAsyncPerfSpec extends TestKit(ActorSystem("test")) with FlatSpecLik
       actor ! m
     }
 
-    messagesNr.times { n => expectMsgType[String](max = 1.minute) should startWith (s"p-hello-$n") }
+    messagesNr.times { n => expectMsgType[String] should startWith (s"p-hello-$n") }
     stopwatch.stop()
 
     info(s"Sending/persisting $messagesNr messages took: $stopwatch time")
-    info(s"This is ${messagesNr / stopwatch.elapsedTime(TimeUnit.SECONDS)} msg/s")
-
-    println("=== DONE === ")
-
-    actor ! "delete"
+    info(s"This is ${messagesNr / stopwatch.elapsedTime(TimeUnit.MILLISECONDS)} msg/ms")
   }
 
-//  it should "replay those messages" in {
-//    val replayed = createActor(messagesNr, "w-1")
-//
-//    replayed ! "ask"
-//
-//    val last = expectMsgType[String]
-//    last should startWith ("hello-1000")
-//  }
-//
-//  it should "delete all messages up until that seq number" in {
-//    val replayed = createActor(messagesNr, "w-1")
-//
-//    replayed ! "delete"
-//
-//    Thread.sleep(1000)
-//  }
+  it should "replay those messages" in {
+    val replayed = createActor(messagesNr, "w-1")
+
+    replayed ! "ask"
+
+    expectMsgType[RecoveryCompleted]
+
+    val last = expectMsgType[String]
+    last should startWith ("hello-1000")
+  }
+
+  it should "delete all messages up until that seq number" in {
+    val p = TestProbe()
+    system.eventStream.subscribe(p.ref, classOf[FinishedDeletes])
+
+    actor ! "delete"
+
+    p.expectMsgType[FinishedDeletes](max = 1.minute)
+  }
 
   private def createActor(awaitMessages: Long, name: String): ActorRef =
     system.actorOf(Props(classOf[Writer], awaitMessages, name))

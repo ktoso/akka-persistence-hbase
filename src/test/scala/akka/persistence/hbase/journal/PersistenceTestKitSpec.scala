@@ -4,7 +4,7 @@ import akka.persistence.journal.JournalSpec
 import com.typesafe.config.ConfigFactory
 
 /**
- * Plugin TCK (martin's) Spec
+ * Plugin TCK (Martin's) Spec
  */
 class PersistenceTestKitSpec extends JournalSpec {
 
