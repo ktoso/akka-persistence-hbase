@@ -24,7 +24,7 @@ class HBaseSnapshotter(val system: ActorSystem, val hBasePersistenceSettings: Pl
 
   implicit val settings = hBasePersistenceSettings
 
-  implicit override val executionContext = system.dispatchers.lookup("akka-hbase-persistence-dispatcher")
+  implicit override val pluginDispatcher = system.dispatchers.lookup("akka-hbase-persistence-dispatcher")
 
   type AsyncBaseRows = JArrayList[JArrayList[KeyValue]]
 

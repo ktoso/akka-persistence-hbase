@@ -1,13 +1,13 @@
 package akka.persistence.hbase.common
 
-import org.hbase.async.{HBaseClient, PutRequest, DeleteRequest, KeyValue}
 import java.{util => ju}
-import org.apache.hadoop.hbase.util.Bytes
-import scala.concurrent.{ExecutionContext, Future}
-import scala.Array
-import akka.persistence.hbase.journal.RowTypeMarkers._
-import akka.persistence.hbase.common.Columns._
+
 import akka.persistence.hbase.journal.PluginPersistenceSettings
+import akka.persistence.hbase.journal.RowTypeMarkers._
+import org.apache.hadoop.hbase.util.Bytes
+import org.hbase.async.{DeleteRequest, HBaseClient, KeyValue, PutRequest}
+
+import scala.concurrent.{ExecutionContext, Future}
 
 trait AsyncBaseUtils {
 
@@ -15,13 +15,13 @@ trait AsyncBaseUtils {
 
   def client: HBaseClient
 
-  implicit val executionContext: ExecutionContext
+  implicit val pluginDispatcher: ExecutionContext
 
   private lazy val Table = Bytes.toBytes(hBasePersistenceSettings.table)
   private lazy val Family = Bytes.toBytes(hBasePersistenceSettings.family)
 
-  import Columns._
-  import DeferredConversions._
+  import akka.persistence.hbase.common.Columns._
+  import akka.persistence.hbase.common.DeferredConversions._
 
   protected def isSnapshotRow(columns: Seq[KeyValue]): Boolean =
     ju.Arrays.equals(findColumn(columns, Marker).value, SnapshotMarkerBytes)
@@ -33,13 +33,13 @@ trait AsyncBaseUtils {
       throw new RuntimeException(s"Unable to find [${Bytes.toString(qualifier)}}] field from: ${columns.map(kv => Bytes.toString(kv.qualifier))}")
     }
 
-  protected def deleteRow(key: Array[Byte]): Future[Unit] = {
-//      log.debug(s"Permanently deleting row: ${Bytes.toString(key)}")
+    protected def deleteRow(key: Array[Byte]): Future[Unit] = {
+      println(s"Permanently deleting row: ${Bytes.toString(key)}")
       executeDelete(key)
     }
 
     protected def markRowAsDeleted(key: Array[Byte]): Future[Unit] = {
-//      log.debug(s"Marking as deleted, for row: ${Bytes.toString(key)}")
+      println(s"Marking as deleted, for row: ${Bytes.toString(key)}")
       executePut(key, Array(Marker), Array(DeletedMarkerBytes))
     }
 

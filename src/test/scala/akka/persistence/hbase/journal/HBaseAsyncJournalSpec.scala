@@ -1,7 +1,8 @@
 package akka.persistence.hbase.journal
 
-import akka.actor.{ActorSystem, Props}
+import akka.actor.{ActorLogging, ActorRef, ActorSystem, Props}
 import akka.persistence._
+import akka.persistence.hbase.common.TestingEventProtocol.FinishedDeletes
 import akka.testkit.{ImplicitSender, TestKit, TestProbe}
 import org.apache.hadoop.hbase.client.HBaseAdmin
 import org.scalatest._
@@ -12,16 +13,28 @@ object HBaseAsyncJournalSpec {
 
   case class DeleteUntil(sequenceNr: Long, permanent: Boolean)
 
-  class MyPersistentActor(override val persistenceId: String) extends PersistentActor {
+  class MyPersistentActor(testActor: ActorRef, override val persistenceId: String) extends PersistentActor with ActorLogging {
 
     val handler: Receive = {
       case DeleteUntil(nr, permanent) =>
+        log.debug("Deleting messages until {}, permanent: {}", nr, permanent)
         deleteMessages(toSequenceNr = nr, permanent)
 
+      case RecoveryCompleted => // do nothing...
+
+      case payload if recoveryRunning =>
+        log.debug("Recovering, got {} @ {} ({})", payload, lastSequenceNr, getCurrentPersistentMessage)
+        sender() ! payload
+        sender() ! lastSequenceNr
+        sender() ! recoveryRunning
+
       case payload =>
-        sender ! payload
-        sender ! lastSequenceNr
-        sender ! recoveryRunning
+        persist(payload) { p =>
+          log.debug("Not in recovery, got {} @ {}", payload, lastSequenceNr)
+          testActor ! payload
+          testActor ! lastSequenceNr
+          testActor ! recoveryRunning
+        }
     }
 
     def receiveCommand = handler
@@ -47,7 +60,7 @@ with Matchers with BeforeAndAfterAll {
   }
 
   it should "write and replay messages" in {
-    val processor1 = system.actorOf(Props(classOf[MyPersistentActor], "p1"))
+    val processor1 = system.actorOf(Props(classOf[MyPersistentActor], self, "p1"))
     info("p1 = " + processor1)
 
     processor1 ! "a"
@@ -55,7 +68,7 @@ with Matchers with BeforeAndAfterAll {
     expectMsgAllOf(max = timeout, "a", 1L, false)
     expectMsgAllOf(max = timeout, "aa", 2L, false)
 
-    val processor2 = system.actorOf(Props(classOf[MyPersistentActor], "p1"))
+    val processor2 = system.actorOf(Props(classOf[MyPersistentActor], self, "p1"))
     processor2 ! "b"
     processor2 ! "c"
     expectMsgAllOf(max = timeout, "a", 1L, true)
@@ -68,7 +81,7 @@ with Matchers with BeforeAndAfterAll {
     val deleteProbe = TestProbe()
     subscribeToDeletion(deleteProbe)
 
-    val processor1 = system.actorOf(Props(classOf[MyPersistentActor], "p2"))
+    val processor1 = system.actorOf(Props(classOf[MyPersistentActor], self, "p2"))
     processor1 ! "a"
     processor1 ! "b"
     expectMsgAllOf(max = timeout, "a", 1L, false)
@@ -77,7 +90,7 @@ with Matchers with BeforeAndAfterAll {
 
     awaitDeletion(deleteProbe)
 
-    system.actorOf(Props(classOf[PersistentActor], "p2"))
+    system.actorOf(Props(classOf[MyPersistentActor], self, "p2"))
     expectMsgAllOf(max = timeout, "b", 2L, true)
   }
 
@@ -85,7 +98,7 @@ with Matchers with BeforeAndAfterAll {
     val deleteProbe = TestProbe()
     subscribeToDeletion(deleteProbe)
 
-    val processor1 = system.actorOf(Props(classOf[MyPersistentActor], "p3"))
+    val processor1 = system.actorOf(Props(classOf[MyPersistentActor], self, "p3"))
     processor1 ! "a"
     processor1 ! "b"
     expectMsgAllOf(max = timeout, "a", 1L, false)
@@ -93,7 +106,7 @@ with Matchers with BeforeAndAfterAll {
     processor1 ! DeleteUntil(1L, permanent = true)
     awaitDeletion(deleteProbe)
 
-    system.actorOf(Props(classOf[PersistentActor], "p3"))
+    system.actorOf(Props(classOf[MyPersistentActor], self, "p3"))
     expectMsgAllOf("b", 2L, true)
   }
 
@@ -102,10 +115,10 @@ with Matchers with BeforeAndAfterAll {
 
 
   def subscribeToDeletion(probe: TestProbe): Unit =
-    system.eventStream.subscribe(probe.ref, classOf[JournalProtocol.DeleteMessages])
+    system.eventStream.subscribe(probe.ref, classOf[FinishedDeletes])
 
   def awaitDeletion(probe: TestProbe): Unit =
-    probe.expectMsgType[JournalProtocol.DeleteMessages](max = 10.seconds)
+    probe.expectMsgType[FinishedDeletes](max = 10.seconds)
 
   override protected def afterAll() {
     val tableName = config.getString("hbase-journal.table")

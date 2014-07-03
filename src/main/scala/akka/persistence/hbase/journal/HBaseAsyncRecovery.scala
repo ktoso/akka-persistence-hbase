@@ -22,7 +22,7 @@ trait HBaseAsyncRecovery extends AsyncRecovery {
 
   private lazy val replayDispatcherId = hBasePersistenceSettings.replayDispatcherId
 
-  override implicit val executionContext = context.system.dispatchers.lookup(replayDispatcherId)
+  override implicit val pluginDispatcher = context.system.dispatchers.lookup(replayDispatcherId)
 
   import akka.persistence.hbase.common.Columns._
   import akka.persistence.hbase.common.DeferredConversions._

@@ -21,8 +21,10 @@ object PersistAsyncPerfSpec {
 
     def receiveCommand = {
       case "ask" =>
-        log.info("Replying with last persisted message {}", lastPersisted)
-        sender() ! lastPersisted
+        if (lastPersisted != null) {
+          log.info("Replying with last persisted message {}", lastPersisted)
+          sender() ! lastPersisted
+        }
 
       case "delete" =>
         log.info("Deleting messages in {}, until {}", persistenceId, lastSequenceNr)
@@ -36,9 +38,10 @@ object PersistAsyncPerfSpec {
     }
 
     def handlePersisted(p: AnyRef): Unit = {
-      log.debug(s"persisted: {} @ {}", p, lastSequenceNr)
-      if (!recoveryRunning)
+      if (!recoveryRunning) {
+        log.debug(s"persisted: {} @ {}", p, lastSequenceNr)
         sender() ! s"p-$p"
+      }
 
       p match {
         case _: String => lastPersisted = p
@@ -63,7 +66,7 @@ class PersistAsyncPerfSpec extends TestKit(ActorSystem("test")) with FlatSpecLik
 
   behavior of "HBaseJournal"
 
-  val messagesNr = 5000
+  val messagesNr = 1000
 
   val messages = (1 to messagesNr) map { i => s"hello-$i-(${new Date})" }
   
@@ -84,7 +87,6 @@ class PersistAsyncPerfSpec extends TestKit(ActorSystem("test")) with FlatSpecLik
     val stopwatch = (new Stopwatch).start()
     
     messages foreach { m =>
-      println(s"actor ! $m")
       actor ! m
     }
 

@@ -1,9 +1,15 @@
 package akka.persistence.hbase.journal
 
-import akka.actor.{Actor, ActorLogging}
+import akka.actor.{Actor, ActorLogging, ActorRef, Props}
 import akka.persistence.hbase.common._
+import akka.persistence.hbase.journal.Operator.AllOpsSubmitted
 import akka.persistence.journal.AsyncWriteJournal
-import akka.persistence.{PersistentConfirmation, PersistenceSettings, PersistentId, PersistentRepr}
+import akka.persistence.{PersistenceSettings, PersistentConfirmation, PersistentId, PersistentRepr}
+import com.google.common.base.Stopwatch
+import org.apache.hadoop.hbase.client.{HTable, Scan}
+import org.apache.hadoop.hbase.filter.CompareFilter.CompareOp
+import org.apache.hadoop.hbase.filter._
+import org.apache.hadoop.hbase.util.Bytes
 
 import scala.collection.immutable
 import scala.concurrent._
@@ -30,19 +36,18 @@ class HBaseAsyncWriteJournal extends Actor with ActorLogging
 
   lazy val publishTestingEvents = hBasePersistenceSettings.publishTestingEvents
 
-  implicit override val executionContext = context.system.dispatchers.lookup(hBasePersistenceSettings.pluginDispatcherId)
+  implicit override val pluginDispatcher = context.system.dispatchers.lookup(hBasePersistenceSettings.pluginDispatcherId)
 
 
   import akka.persistence.hbase.common.Columns._
   import akka.persistence.hbase.common.DeferredConversions._
   import org.apache.hadoop.hbase.util.Bytes._
 
-import scala.collection.JavaConverters._
-
   // journal plugin api impl -------------------------------------------------------------------------------------------
 
   override def asyncWriteMessages(persistentBatch: immutable.Seq[PersistentRepr]): Future[Unit] = {
     log.debug(s"Write async for {} presistent messages", persistentBatch.size)
+    val watch = (new Stopwatch).start()
 
     val futures = persistentBatch map { p =>
       import p._
@@ -55,22 +60,81 @@ import scala.collection.JavaConverters._
     }
 
     flushWrites()
-    Future.sequence(futures) map {
-      case _ if publishTestingEvents => context.system.eventStream.publish(FinishedWrites(persistentBatch.size))
+    Future.sequence(futures) map { case _ =>
+      log.debug("Completed writing {} messages (took: {})", persistentBatch.size, watch.stop()) // todo better failure / success?
+      if (publishTestingEvents) context.system.eventStream.publish(FinishedWrites(persistentBatch.size))
     }
   }
 
+  // todo should be optimised to do ranged deletes
+  override def asyncDeleteMessagesTo(persistenceId: String, toSequenceNr: Long, permanent: Boolean): Future[Unit] = {
+    val watch = (new Stopwatch).start()
+    log.debug(s"AsyncDeleteMessagesTo for persistenceId: {} to sequenceNr: {}, premanent: {}", persistenceId, toSequenceNr, permanent)
+
+    // prepare delete function (delete or mark as deleted)
+    val doDelete = deleteFunctionFor(permanent)
+
+    def enqueueDeleteOps(operator: ActorRef): Unit = {
+      val startScanKey = RowKey.firstForProcessor(persistenceId)                     // 000-ID-000000000000
+      val stopScanKey = RowKey.lastForProcessorScan(persistenceId, toSequenceNr + 1) // 999-ID-0000[seqNr]
+      val persistenceIdRowRegex = RowKey.patternForProcessor(persistenceId)          //  .*-ID-.*
+
+      val scan = new Scan
+      scan.setStartRow(startScanKey.toBytes)
+      scan.setStopRow(stopScanKey.toBytes)
+
+      val fl = new FilterList()
+      fl.addFilter(new RowFilter(CompareOp.EQUAL, new RegexStringComparator(persistenceIdRowRegex)))
+      fl.addFilter(new FirstKeyOnlyFilter)
+      fl.addFilter(new KeyOnlyFilter)
+      scan.setFilter(fl)
+
+      log.debug("Scanning for keys to delete, start: {}, stop: {}, regex: {}", startScanKey, stopScanKey, persistenceIdRowRegex)
+
+      val table = new HTable(hadoopConfig, Table)
+      try {
+        val scanner = table.getScanner(scan)
+
+        try {
+          var res = scanner.next()
+          while (res != null) {
+            operator ! res.getRow
+            res = scanner.next()
+          }
+        } finally {
+          operator ! AllOpsSubmitted
+          scanner.close()
+        }
+      } finally table.close()
+    }
+
+    val deleteRowsPromise = Promise[Unit]()
+
+    val operator = context.actorOf(Operator.props(deleteRowsPromise, doDelete, hBasePersistenceSettings.pluginDispatcherId))
+    enqueueDeleteOps(operator)
+
+    deleteRowsPromise.future map { case _ =>
+      log.debug("Finished deleting messages for persistenceId: {}, to sequenceNr: {}, permanent: {} (took: {})", persistenceId, toSequenceNr, permanent, watch.stop())
+      context.system.eventStream.publish(FinishedDeletes(toSequenceNr))
+    }
+  }
+
+  @deprecated("Will be removed")
   override def asyncWriteConfirmations(confirmations: immutable.Seq[PersistentConfirmation]): Future[Unit] = {
     log.debug(s"AsyncWriteConfirmations for {} messages", confirmations.size)
+    val watch = (new Stopwatch).start()
 
     val fs = confirmations map { confirm =>
       confirmAsync(confirm.persistenceId, confirm.sequenceNr, confirm.channelId)
     }
 
     flushWrites()
-    Future.sequence(fs)
+    Future.sequence(fs) map { case _ =>
+      log.debug("Completed confirming {} messages (took: {})", confirmations.size, watch.stop()) // todo better failure / success?
+    }
   }
 
+  @deprecated("Will be removed")
   override def asyncDeleteMessages(messageIds: immutable.Seq[PersistentId], permanent: Boolean): Future[Unit] = {
     log.debug(s"Async delete [{}] messages, premanent: {}", messageIds.size, permanent)
 
@@ -85,44 +149,9 @@ import scala.collection.JavaConverters._
     Future.sequence(deleteFutures)
   }
 
-  override def asyncDeleteMessagesTo(persistenceId: String, toSequenceNr: Long, permanent: Boolean): Future[Unit] = {
-    log.debug(s"AsyncDeleteMessagesTo for persistenceId: {} to sequenceNr: {}, premanent: {}", persistenceId, toSequenceNr, permanent)
-    val doDelete = deleteFunctionFor(permanent)
-
-    val scanner = newScanner()
-    scanner.setStartKey(RowKey.firstForProcessor(persistenceId).toBytes)
-    scanner.setStopKey(RowKey(persistenceId, toSequenceNr).toBytes)
-    scanner.setKeyRegexp(RowKey.patternForProcessor(persistenceId))
-
-    def handleRows(in: AnyRef): Future[Unit] = in match {
-      case null =>
-        log.debug("AsyncDeleteMessagesTo finished scanning for keys")
-        flushWrites()
-        scanner.close()
-        Future(Array[Byte]())
-
-      case rows: AsyncBaseRows  =>
-        val deletes = for {
-          row <- rows.asScala
-          col <- row.asScala.headOption // just one entry is enough, because is contains the key
-        } yield doDelete(col.key)
-
-        go() flatMap { _ => Future.sequence(deletes) }
-    }
-
-    def go() = scanner.nextRows() flatMap handleRows
-
-    val fAll = go()
-    fAll onComplete { case _ =>
-      log.debug("Finished deleting messages for persistenceId: {}, to sequenceNr: {}, permanent: {}", persistenceId, toSequenceNr, permanent)
-      context.system.eventStream.publish(FinishedDeletes(toSequenceNr))
-    }
-    fAll
-  }
-
   // end of journal plugin api impl ------------------------------------------------------------------------------------
 
-  def confirmAsync(persistenceId: String, sequenceNr: Long, channelId: String): Future[Unit] = {
+  private def confirmAsync(persistenceId: String, sequenceNr: Long, channelId: String): Future[Unit] = {
       log.debug(s"Confirming async for persistenceId: {}, sequenceNr: {} and channelId: {}", persistenceId, sequenceNr, channelId)
 
       executePut(
@@ -141,4 +170,55 @@ import scala.collection.JavaConverters._
     client.shutdown()
     super.postStop()
   }
+}
+
+/**
+ * Actor which gets row keys and performs operations on them.
+ * Completes the given `finish` promoise once all keys have been processed.
+ *
+ * Requires being notified when there's no more incoming work, by sending [[Operator.AllOpsSubmitted]]
+ *
+ * @param finish promise to complete one all ops have been applied to the submitted keys
+ * @param op operation to be applied on each submitted key
+ */
+private[hbase] class Operator(finish: Promise[Unit], op: Array[Byte] => Future[Unit]) extends Actor with ActorLogging {
+
+  val watch = (new Stopwatch).start()
+
+  var totalOps: Long = 0 // how many ops were we given to process (from user-land)
+  var processedOps: Long = 0 // how many ops are pending to finish (from hbase-land)
+
+  var allOpsSubmitted = false // are we don submitting ops to be applied?
+
+  import context.dispatcher
+  import akka.persistence.hbase.journal.Operator._
+
+  def receive = {
+    case key: Array[Byte] =>
+      log.debug("Will apply op to {}", Bytes.toString(key))
+      totalOps += 1
+      op(key) foreach { _ => self ! OpApplied }
+
+    case AllOpsSubmitted =>
+      log.debug("Received a total of {} ops to execute.", totalOps)
+      allOpsSubmitted = true
+
+    case OpApplied(key) =>
+      log.debug("Applied operation to row [{}], processed: {}, total: {}", key, processedOps, totalOps)
+      processedOps += 1
+
+      if (allOpsSubmitted && (processedOps == totalOps)) {
+        log.debug("Finished processing all {} ops. (took: )", totalOps, watch.stop())
+        finish.success(())
+        context stop self
+      }
+  }
+}
+object Operator {
+
+  def props(deleteRowsPromise: Promise[Unit], doDelete: Array[Byte] => Future[Unit], dispatcher: String): Props =
+    Props(classOf[Operator], deleteRowsPromise, doDelete).withDispatcher(dispatcher)
+
+  final case class OpApplied(row: Array[Byte])
+  object AllOpsSubmitted
 }
