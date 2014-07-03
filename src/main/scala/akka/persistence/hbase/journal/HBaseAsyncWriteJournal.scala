@@ -9,7 +9,6 @@ import com.google.common.base.Stopwatch
 import org.apache.hadoop.hbase.client.{HTable, Scan}
 import org.apache.hadoop.hbase.filter.CompareFilter.CompareOp
 import org.apache.hadoop.hbase.filter._
-import org.apache.hadoop.hbase.util.Bytes
 
 import scala.collection.immutable
 import scala.concurrent._
@@ -111,11 +110,11 @@ class HBaseAsyncWriteJournal extends Actor with ActorLogging
     val deleteRowsPromise = Promise[Unit]()
 
     val operator = context.actorOf(Operator.props(deleteRowsPromise, doDelete, hBasePersistenceSettings.pluginDispatcherId))
-    enqueueDeleteOps(operator)
+    Future { enqueueDeleteOps(operator) }
 
     deleteRowsPromise.future map { case _ =>
       log.debug("Finished deleting messages for persistenceId: {}, to sequenceNr: {}, permanent: {} (took: {})", persistenceId, toSequenceNr, permanent, watch.stop())
-      context.system.eventStream.publish(FinishedDeletes(toSequenceNr))
+      if (publishTestingEvents) context.system.eventStream.publish(FinishedDeletes(toSequenceNr))
     }
   }
 
@@ -183,32 +182,28 @@ class HBaseAsyncWriteJournal extends Actor with ActorLogging
  */
 private[hbase] class Operator(finish: Promise[Unit], op: Array[Byte] => Future[Unit]) extends Actor with ActorLogging {
 
-  val watch = (new Stopwatch).start()
-
   var totalOps: Long = 0 // how many ops were we given to process (from user-land)
   var processedOps: Long = 0 // how many ops are pending to finish (from hbase-land)
 
   var allOpsSubmitted = false // are we don submitting ops to be applied?
 
-  import context.dispatcher
   import akka.persistence.hbase.journal.Operator._
+  import context.dispatcher
 
   def receive = {
     case key: Array[Byte] =>
-      log.debug("Will apply op to {}", Bytes.toString(key))
       totalOps += 1
-      op(key) foreach { _ => self ! OpApplied }
+      op(key) foreach { _ => self ! OpApplied(key) }
 
     case AllOpsSubmitted =>
       log.debug("Received a total of {} ops to execute.", totalOps)
       allOpsSubmitted = true
 
     case OpApplied(key) =>
-      log.debug("Applied operation to row [{}], processed: {}, total: {}", key, processedOps, totalOps)
       processedOps += 1
 
       if (allOpsSubmitted && (processedOps == totalOps)) {
-        log.debug("Finished processing all {} ops. (took: )", totalOps, watch.stop())
+        log.debug("Finished processing all {} ops.", totalOps)
         finish.success(())
         context stop self
       }
