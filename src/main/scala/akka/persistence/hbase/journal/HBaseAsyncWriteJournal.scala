@@ -61,7 +61,7 @@ import scala.collection.JavaConverters._
   }
 
   override def asyncWriteConfirmations(confirmations: immutable.Seq[PersistentConfirmation]): Future[Unit] = {
-    log.debug(s"AsyncWriteConfirmations for ${confirmations.size} messages")
+    log.debug(s"AsyncWriteConfirmations for {} messages", confirmations.size)
 
     val fs = confirmations map { confirm =>
       confirmAsync(confirm.persistenceId, confirm.sequenceNr, confirm.channelId)

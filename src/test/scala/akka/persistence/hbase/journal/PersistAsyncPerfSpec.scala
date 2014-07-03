@@ -96,14 +96,17 @@ class PersistAsyncPerfSpec extends TestKit(ActorSystem("test")) with FlatSpecLik
   }
 
   it should "replay those messages" in {
+    val p = TestProbe()
+    system.eventStream.subscribe(p.ref, classOf[RecoveryCompleted])
+
     val replayed = createActor(messagesNr, "w-1")
 
     replayed ! "ask"
 
-    expectMsgType[RecoveryCompleted]
+    p.expectMsgType[RecoveryCompleted]
 
     val last = expectMsgType[String]
-    last should startWith ("hello-1000")
+    last should startWith ("hello-")
   }
 
   it should "delete all messages up until that seq number" in {
