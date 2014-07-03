@@ -3,10 +3,9 @@ package akka.persistence.hbase.journal
 import java.util.Date
 import java.util.concurrent.TimeUnit
 
-import akka.actor.{ActorLogging, ActorSystem, Props}
+import akka.actor.{ActorLogging, ActorRef, ActorSystem, Props}
 import akka.persistence._
-import akka.persistence.hbase.common.TestingEventProtocol._
-import akka.testkit.{TestKit, TestProbe}
+import akka.testkit.{ImplicitSender, TestKit}
 import com.google.common.base.Stopwatch
 import org.scalatest.{BeforeAndAfterAll, FlatSpecLike, Matchers}
 
@@ -14,24 +13,37 @@ import scala.concurrent.duration._
 
 object PersistAsyncPerfSpec {
 
-  class Writer(untilSeqNr: Int, override val persistenceId: String) extends PersistentActor
+  class Writer(untilSeqNr: Long, override val persistenceId: String) extends PersistentActor
     with ActorLogging {
 
+    var lastPersisted: Any = _
+
     def receiveCommand = {
-      case payload if lastSequenceNr != untilSeqNr =>
-        persistAsync(payload) { p => log.debug(s"persisted: {} @ {}", p, lastSequenceNr) }
+      case "ask" =>
+        log.info("Replying with last persisted message {}", lastPersisted)
+        sender() ! lastPersisted
+
+      case "delete" =>
+        log.info("Deleting messages in {}, until {}", persistenceId, lastSequenceNr)
+        deleteMessages(toSequenceNr = lastSequenceNr)
+
+      case "boom" =>
+        throw new RuntimeException("Boom!")
 
       case payload =>
-        persistAsync(payload) { p =>
-          sender ! FinishedWrites(lastSequenceNr)
+        persistAsync(payload)(handlePersisted)
+    }
 
-          log.info("Deleting messages in {}, until {}", persistenceId, lastSequenceNr)
-          deleteMessages(toSequenceNr = lastSequenceNr)
-        }
+    def handlePersisted(p: Any): Unit = {
+      log.debug(s"persisted: {} @ {}", p, lastSequenceNr)
+      if (!recoveryRunning)
+        sender() ! s"p-$p"
+      
+      lastPersisted = p
     }
 
     override def receiveRecover: Receive = {
-      case m => println("recover: " + m)
+      case m => log.info("recover: " + m)
     }
   }
 
@@ -39,7 +51,7 @@ object PersistAsyncPerfSpec {
 
 //@DoNotDiscover
 class PersistAsyncPerfSpec extends TestKit(ActorSystem("test")) with FlatSpecLike
-  with Matchers with BeforeAndAfterAll {
+  with ImplicitSender with Matchers with BeforeAndAfterAll {
 
   import akka.persistence.hbase.journal.PersistAsyncPerfSpec._
 
@@ -47,41 +59,65 @@ class PersistAsyncPerfSpec extends TestKit(ActorSystem("test")) with FlatSpecLik
 
   behavior of "HBaseJournal"
 
-  override protected def beforeAll() {
-    HBaseJournalInit.createTable(config)
-  }
-
-  val messagesNr = 1000
+  val messagesNr = 5000
 
   val messages = (1 to messagesNr) map { i => s"hello-$i-(${new Date})" }
+  
+  var actor = createActor(messagesNr, "w-1")
+
+  override def beforeAll() {
+    HBaseJournalInit.createTable(config)
+    super.beforeAll()
+  }
+  
+  override def afterAll() {
+    system.shutdown()
+    system.awaitTermination(1.minute)
+    super.afterAll()
+  }
 
   it should s"write $messagesNr messages" in {
-    // given
-    val probe = TestProbe()
-    system.eventStream.subscribe(probe.ref, classOf[FinishedWrites])
-
-    val writer = system.actorOf(Props(classOf[Writer], messagesNr, "w-1"))
-
-    // when
     val stopwatch = (new Stopwatch).start()
+    
+    messages foreach { m =>
+      println(s"actor ! $m")
+      actor ! m
+    }
 
-    messages foreach { writer ! _ }
-
-    // then
-    probe.expectMsg(max = 2.minute, FinishedWrites(1))
-    (messagesNr / 200 - 1).times { probe.expectMsg(max = 2.minute, FinishedWrites(200)); }
-    probe.expectMsg(max = 2.minute, FinishedWrites(199))
+    messagesNr.times { n => expectMsgType[String](max = 1.minute) should startWith (s"p-hello-$n") }
     stopwatch.stop()
-    system.eventStream.unsubscribe(probe.ref)
 
     info(s"Sending/persisting $messagesNr messages took: $stopwatch time")
     info(s"This is ${messagesNr / stopwatch.elapsedTime(TimeUnit.SECONDS)} msg/s")
 
+    println("=== DONE === ")
+
+    actor ! "delete"
   }
 
+//  it should "replay those messages" in {
+//    val replayed = createActor(messagesNr, "w-1")
+//
+//    replayed ! "ask"
+//
+//    val last = expectMsgType[String]
+//    last should startWith ("hello-1000")
+//  }
+//
+//  it should "delete all messages up until that seq number" in {
+//    val replayed = createActor(messagesNr, "w-1")
+//
+//    replayed ! "delete"
+//
+//    Thread.sleep(1000)
+//  }
+
+  private def createActor(awaitMessages: Long, name: String): ActorRef =
+    system.actorOf(Props(classOf[Writer], awaitMessages, name))
+
   implicit class TimesInt(i: Int) {
-    def times(block: => Unit) = {
-      1 to i foreach { _ => block }
+    def times(block: Int => Unit) = {
+      1 to i foreach block
     }
   }
 
