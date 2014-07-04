@@ -8,8 +8,10 @@ import akka.persistence._
 import akka.persistence.hbase.common.TestingEventProtocol.FinishedDeletes
 import akka.testkit.{ImplicitSender, TestKit, TestProbe}
 import com.google.common.base.Stopwatch
+import org.apache.hadoop.hbase.client.{Scan, HTable}
 import org.scalatest.{BeforeAndAfterAll, FlatSpecLike, Matchers}
 
+import scala.collection.JavaConversions
 import scala.concurrent.duration._
 
 object PersistAsyncPerfSpec {
@@ -65,7 +67,9 @@ class PersistAsyncPerfSpec extends TestKit(ActorSystem("test")) with FlatSpecLik
 
   import akka.persistence.hbase.journal.PersistAsyncPerfSpec._
 
-  val config = system.settings.config
+  lazy val config = system.settings.config
+
+  lazy val pluginConfig = PluginPersistenceSettings(config)
 
   behavior of "HBaseJournal"
 
@@ -121,6 +125,19 @@ class PersistAsyncPerfSpec extends TestKit(ActorSystem("test")) with FlatSpecLik
     actor ! "delete"
 
     p.expectMsgType[FinishedDeletes](max = 1.minute)
+
+    countMessages() should equal (0)
+  }
+
+  private def countMessages(): Int = {
+    val hTable = new HTable(pluginConfig.hadoopConfiguration, pluginConfig.table)
+    val scan = new Scan
+    val scanner = hTable.getScanner(scan)
+    import JavaConversions._
+    val count = scanner.iterator().foldLeft(0) { case (acc, _) => acc + 1}
+    scanner.close()
+    hTable.close()
+    count
   }
 
   private def createActor(awaitMessages: Long, name: String): ActorRef =

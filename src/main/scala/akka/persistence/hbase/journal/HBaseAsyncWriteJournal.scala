@@ -9,7 +9,6 @@ import com.google.common.base.Stopwatch
 import org.apache.hadoop.hbase.client.{HTable, Scan}
 import org.apache.hadoop.hbase.filter.CompareFilter.CompareOp
 import org.apache.hadoop.hbase.filter._
-import org.apache.hadoop.hbase.util.Bytes
 
 import scala.collection.immutable
 import scala.concurrent._
@@ -72,15 +71,19 @@ class HBaseAsyncWriteJournal extends Actor with ActorLogging
   // todo should be optimised to do ranged deletes
   override def asyncDeleteMessagesTo(persistenceId: String, toSequenceNr: Long, permanent: Boolean): Future[Unit] = {
     val watch = (new Stopwatch).start()
-    log.debug(s"AsyncDeleteMessagesTo for persistenceId: {} to sequenceNr: {}, premanent: {}", persistenceId, toSequenceNr, permanent)
+    log.debug(s"AsyncDeleteMessagesTo for persistenceId: {} to sequenceNr: {} (inclusive), premanent: {}", persistenceId, toSequenceNr, permanent)
 
     // prepare delete function (delete or mark as deleted)
     val doDelete = deleteFunctionFor(permanent)
 
     def scanAndDeletePartition(part: Long, operator: ActorRef): Unit = {
-      val startScanKey = RowKey.firstInPartition(persistenceId, part)             // 021-ID-000000000000000000
-      val stopScanKey = RowKey.lastInPartition(persistenceId, part, toSequenceNr) // 021-ID-9223372036854775800
-      val persistenceIdRowRegex = RowKey.patternForProcessor(persistenceId)       //  .*-ID-.*
+      val startScanKey = RowKey.firstInPartition(persistenceId, part)                 // 021-ID-000000000000000000
+      val stopScanKey = RowKey.lastInPartition(persistenceId, part, toSequenceNr + 1) // 021-ID-9223372036854775800
+      val persistenceIdRowRegex = RowKey.patternForProcessor(persistenceId)           //  .*-ID-.*
+
+      // we can avoid canning some partitions - guaranteed to be empty for smaller than the partition number seqNrs
+      if (part > toSequenceNr)
+        return
 
       log.debug("Scanning for keys to delete, start: {}, stop: {}, regex: {}", startScanKey.toKeyString, stopScanKey.toKeyString, persistenceIdRowRegex)
 
@@ -194,7 +197,7 @@ private[hbase] class Operator(finish: Promise[Unit], op: Array[Byte] => Future[U
 
   def receive = {
     case key: Array[Byte] =>
-      log.debug("Scheduling op on: {}", Bytes.toString(key))
+//      log.debug("Scheduling op on: {}", Bytes.toString(key))
       totalOps += 1
       op(key) foreach { _ => self ! OpApplied(key) }
 

@@ -56,7 +56,7 @@ trait HBaseAsyncRecovery extends AsyncRecovery {
         val stopScanKey = RowKey.lastInPartition(persistenceId, part, toSequenceNr) // 021-ID-9223372036854775800
         val persistenceIdRowRegex = RowKey.patternForProcessor(persistenceId) //  .*-ID-.*
 
-        log.info("Scanning {} partition, from {} to {}", part, startScanKey.toKeyString, stopScanKey.toKeyString)
+        log.info("Scanning {} partition for replay, from {} to {}", part, startScanKey.toKeyString, stopScanKey.toKeyString)
 
         val scan = preparePartitionScan(startScanKey, stopScanKey, persistenceIdRowRegex, onlyRowKeys = false)
         val scanner = hTable.getScanner(scan)
@@ -146,7 +146,7 @@ trait HBaseAsyncRecovery extends AsyncRecovery {
       val stopScanKey = RowKey.lastInPartition(persistenceId, part)                   // 021-ID-9223372036854775897
       val persistenceIdRowRegex = RowKey.patternForProcessor(persistenceId)           //  .*-ID-.*
 
-      log.info("Scanning {} partition, from {} to {}", part, startScanKey.toKeyString, stopScanKey.toKeyString)
+//      log.info("Scanning {} partition, from {} to {}", part, startScanKey.toKeyString, stopScanKey.toKeyString)
 
       val scan = preparePartitionScan(startScanKey, stopScanKey, persistenceIdRowRegex, onlyRowKeys = true)
       val scanner = hTable.getScanner(scan)
@@ -156,11 +156,8 @@ trait HBaseAsyncRecovery extends AsyncRecovery {
       try {
         var res = scanner.next()
         while (res != null) {
-          println("res.getRow = " + Bytes.toString(res.getRow))
           val seqNr = RowKey.extractSeqNr(res.getRow)
-          println("seqNr = " + seqNr)
           highestSeqNr = math.max(highestSeqNr, seqNr)
-//          val persistentRepr = persistentFromBytes(CellUtil.cloneValue(messageCell))
           res = scanner.next()
         }
         highestSeqNr
@@ -273,21 +270,15 @@ private[hbase] class Resequencer(
 
   def receive = {
     case p: PersistentRepr ⇒
-      log.debug("Resequencing {} from {}; Delivered until {} already", p.payload, p.sequenceNr, deliveredSeqNr)
+//      log.debug("Resequencing {} from {}; Delivered until {} already", p.payload, p.sequenceNr, deliveredSeqNr)
       resequence(p)
 
     case AllPersistentsSubmitted(assumeSequenceStartsAt) =>
-      log.info("assumeSequenceStartsAt = " + assumeSequenceStartsAt)
-      log.info("deliveredMsgs = " + deliveredMsgs)
-      log.info("delayed = " + delayed)
-
       if (deliveredMsgs == 0L) {
         // kick off recovery from the assumed lowest seqNr
         // could be not 1 because of permanent deletion, yet replay was requested from 1
         this.sequenceStartsAt = assumeSequenceStartsAt
         this.deliveredSeqNr = sequenceStartsAt - 1
-
-        log.info("this.deliveredSeqNr = sequenceStartsAt - 1 = " + (sequenceStartsAt - 1))
 
         val ro = delayed.remove(deliveredSeqNr + 1)
         if (ro.isDefined) resequence(ro.get)
@@ -302,7 +293,7 @@ private[hbase] class Resequencer(
 
     if (p.sequenceNr == deliveredSeqNr + 1) {
       deliveredSeqNr = p.sequenceNr
-      log.debug("Applying {} @ {}", p.payload, p.sequenceNr)
+//      log.debug("Applying {} @ {}", p.payload, p.sequenceNr)
       replayCallback(p)
 
       if (deliveredMsgs == maxMsgsToSequence) {
