@@ -142,11 +142,11 @@ with Matchers with BeforeAndAfterAll {
     val p2 = TestProbe()
     system.actorOf(Props(classOf[MyPersistentActor], p2.ref, "p4"))
     p2.fishForMessage(max = 2.minute, hint = "next-messages") {
-      case x => println(x); false
-//      case "next-1" => false
-//      case "next-2" => false
-//      case "next-3" => true
-//      case other: String => throw new AssertionError(s"Very wrong! must not get ${other} strings!")
+      case "next-1" => false
+      case "next-2" => false
+      case "next-3" => true
+      case b: Boolean => false
+      case n: Long => false
     }
   }
 

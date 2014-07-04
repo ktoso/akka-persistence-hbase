@@ -60,7 +60,7 @@ trait HBaseAsyncRecovery extends AsyncRecovery {
         if (part > toSequenceNr)
           return 0
 
-        log.info("Scanning {} partition for replay, from {} to {}", part, startScanKey.toKeyString, stopScanKey.toKeyString)
+        log.debug("Scanning {} partition for replay, from {} to {}", part, startScanKey.toKeyString, stopScanKey.toKeyString)
 
         val scan = preparePartitionScan(startScanKey, stopScanKey, persistenceIdRowRegex, onlyRowKeys = false)
         val scanner = hTable.getScanner(scan)
@@ -149,7 +149,7 @@ trait HBaseAsyncRecovery extends AsyncRecovery {
       val stopScanKey = RowKey.lastInPartition(persistenceId, part)                   // 021-ID-9223372036854775897
       val persistenceIdRowRegex = RowKey.patternForProcessor(persistenceId)           //  .*-ID-.*
 
-//      log.info("Scanning {} partition, from {} to {}", part, startScanKey.toKeyString, stopScanKey.toKeyString)
+//      log.debug("Scanning {} partition, from {} to {}", part, startScanKey.toKeyString, stopScanKey.toKeyString)
 
       val scan = preparePartitionScan(startScanKey, stopScanKey, persistenceIdRowRegex, onlyRowKeys = true)
       val scanner = hTable.getScanner(scan)
@@ -165,7 +165,7 @@ trait HBaseAsyncRecovery extends AsyncRecovery {
         }
         highestSeqNr
       } finally {
-        log.debug("Done scheduling replays in partition {} (highest seqNr: {})", part, highestSeqNr)
+        if (highestSeqNr != 0) log.debug("Done scheduling replays in partition {} (highest seqNr: {})", part, highestSeqNr)
         scanner.close()
       }
     }
@@ -175,7 +175,7 @@ trait HBaseAsyncRecovery extends AsyncRecovery {
       case seqNrs if seqNrs.isEmpty => 0L
       case seqNrs => seqNrs.max
     } map { seqNr =>
-      log.info("Found highest seqNr for persistenceId: {}, it's: {}", persistenceId, seqNr)
+      log.debug("Found highest seqNr for persistenceId: {}, it's: {}", persistenceId, seqNr)
       seqNr
     }
 
