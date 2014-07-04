@@ -46,23 +46,21 @@ import scala.collection.JavaConverters._
     val partitions = hBasePersistenceSettings.partitionCount
 
     def scanPartition(part: Long, resequencer: ActorRef): Long = {
-      val startScanKey = RowKey.firstInPartition(persistenceId, part)       // 021-ID-0000000000000000021
-      val stopScanKey = RowKey.lastInPartition(persistenceId, part)         // 021-ID-9223372036854775800
-      val persistenceIdRowRegex = RowKey.patternForProcessor(persistenceId) //  .*-ID-.*
+      val startScanKey = RowKey.firstInPartition(persistenceId, part)             // 021-ID-0000000000000000021
+      val stopScanKey = RowKey.lastInPartition(persistenceId, part, toSequenceNr) // 021-ID-9223372036854775800
+      val persistenceIdRowRegex = RowKey.patternForProcessor(persistenceId)       //  .*-ID-.*
 
       log.info("Scanning {} partition, from {} to {}", part, startScanKey.toKeyString, stopScanKey.toKeyString)
 
       val scan = new Scan
       scan.setStartRow(startScanKey.toBytes) // inclusive
       scan.setStopRow(stopScanKey.toBytes) // exclusive
+      scan.setBatch(hBasePersistenceSettings.scanBatchSize)
 
       scan.addColumn(FamilyBytes, Marker)
       scan.addColumn(FamilyBytes, Message)
 
-      val fl = new FilterList()
-//      fl.addFilter(new FirstKeyOnlyFilter)
-      fl.addFilter(new RowFilter(CompareOp.EQUAL, new RegexStringComparator(persistenceIdRowRegex)))
-      scan.setFilter(fl)
+      scan.setFilter(new RowFilter(CompareOp.EQUAL, new RegexStringComparator(persistenceIdRowRegex)))
 
       val scanner = hTable.getScanner(scan)
       var scheduled = 0L
@@ -81,7 +79,6 @@ import scala.collection.JavaConverters._
                 val persistentRepr = persistentFromBytes(CellUtil.cloneValue(messageCell))
 
                 val seqNr = persistentRepr.sequenceNr
-                println("seqNr = " + seqNr + "| in " + part)
                 if (fromSequenceNr <= seqNr && seqNr <= toSequenceNr) {
                   resequencer ! persistentRepr
                   scheduled += 1
@@ -119,52 +116,8 @@ import scala.collection.JavaConverters._
     val partitionScans = (1 to partitions).map(i => Future { scanPartition(i, resequencer) })
     Future.sequence(partitionScans) onComplete { _ => resequencer ! AllPersistentsSubmitted }
 
-//    val scanner = newScanner()
-//    scanner.setStartKey(RowKey(persistenceId, fromSequenceNr).toBytes)
-//    scanner.setStopKey(RowKey.lastForProcessorScan(persistenceId, toSequenceNr).toBytes)
-//    scanner.setKeyRegexp(RowKey.patternForProcessor(persistenceId))
-//
-//    scanner.setMaxNumRows(hBasePersistenceSettings.scanBatchSize)
-//
-//
-//
-//    def handleRows(in: AnyRef): Future[Long] = in match {
-//      case null =>
-//        log.debug("replayAsync - finished scheduling!")
-//        resequencer ! AllPersistentsSubmitted
-//        scanner.close()
-//        Future(0L)
-//
-//      case rows: AsyncBaseRows =>
-//        log.debug(s"replayAsync - got ${rows.size} rows...")
-//
-//        for {
-//          row <- rows.asScala
-//          cols = row.asScala
-//
-//          // convert and resequence
-//          markerKeyValue = findColumn(cols, Marker)
-//          marker = Bytes.toString(markerKeyValue.value)
-//
-//          // if it's NOT deleted, we pass it on (can be: Actual, Snapshot, Confirmation)
-//          if marker != RowTypeMarkers.DeletedMarker
-//
-//          messageKeyValue = findColumn(cols, Message)
-//          persistentRepr = persistentFromBytes(messageKeyValue.value)
-//        } yield {
-//          log.info("Scheduling replay of {} @ {}", persistentRepr.payload, persistentRepr.sequenceNr)
-//          resequencer ! persistentRepr
-//        }
-//
-//        go()
-//    }
-//
-//    def go() = scanner.nextRows() flatMap handleRows
-//
-//    go()
-//
     reachedSeqNrPromise.future map { case _ =>
-      log.info("Completed playback!")
+      log.info("Completed recovery scanning for persistenceId {}", persistenceId)
     }
   }
 
@@ -191,7 +144,7 @@ import scala.collection.JavaConverters._
         }
     }
 
-    def go() = scanner.nextRows() flatMap handleRows
+    def go() = scanner.nextRows(hBasePersistenceSettings.scanBatchSize) flatMap handleRows
 
     go() map { case l =>
       log.debug("Finished scanning for highest sequence number: {}", l)
@@ -238,7 +191,6 @@ private[hbase] class Resequencer(replayCallback: PersistentRepr => Unit, reached
   @scala.annotation.tailrec
   private def resequence(p: PersistentRepr) {
     if (p.sequenceNr == delivered + 1) {
-      log.debug("Applying replay of {} @ {}", p.payload, p.sequenceNr)
       delivered = p.sequenceNr
       replayCallback(p)
 

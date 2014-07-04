@@ -9,7 +9,6 @@ import com.google.common.base.Stopwatch
 import org.apache.hadoop.hbase.client.{HTable, Scan}
 import org.apache.hadoop.hbase.filter.CompareFilter.CompareOp
 import org.apache.hadoop.hbase.filter._
-import org.apache.hadoop.hbase.util.Bytes
 
 import scala.collection.immutable
 import scala.concurrent._
@@ -77,13 +76,14 @@ class HBaseAsyncWriteJournal extends Actor with ActorLogging
     val doDelete = deleteFunctionFor(permanent)
 
     def enqueueDeleteOps(operator: ActorRef): Unit = {
-      val startScanKey = RowKey.firstForProcessor(persistenceId)                     // 000-ID-000000000000
-      val stopScanKey = RowKey.lastForProcessorScan(persistenceId, toSequenceNr + 1) // 999-ID-0000[seqNr]
+      val startScanKey = RowKey.firstForPersistenceId(persistenceId)                 // 000-ID-000000000000
+      val stopScanKey = RowKey.lastForPersistenceId(persistenceId, toSequenceNr + 1) // 999-ID-0000[seqNr]
       val persistenceIdRowRegex = RowKey.patternForProcessor(persistenceId)          //  .*-ID-.*
 
       val scan = new Scan
       scan.setStartRow(startScanKey.toBytes)
       scan.setStopRow(stopScanKey.toBytes)
+      scan.setBatch(hBasePersistenceSettings.scanBatchSize)
 
       val fl = new FilterList()
       fl.addFilter(new FirstKeyOnlyFilter)
@@ -192,7 +192,6 @@ private[hbase] class Operator(finish: Promise[Unit], op: Array[Byte] => Future[U
 
   def receive = {
     case key: Array[Byte] =>
-      log.info("TO DELETE: " + Bytes.toString(key))
       totalOps += 1
       op(key) foreach { _ => self ! OpApplied(key) }
 

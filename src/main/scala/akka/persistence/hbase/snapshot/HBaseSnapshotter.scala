@@ -39,7 +39,7 @@ class HBaseSnapshotter(val system: ActorSystem, val hBasePersistenceSettings: Pl
     val scanner = newScanner()
     val SnapshotSelectionCriteria(maxSequenceNr, maxTimestamp) = criteria
 
-    val start = RowKey.firstForProcessor(persistenceId)
+    val start = RowKey.firstForPersistenceId(persistenceId)
     val stop = RowKey(persistenceId, maxSequenceNr)
 
     scanner.setStartKey(start.toBytes)
@@ -111,7 +111,7 @@ class HBaseSnapshotter(val system: ActorSystem, val hBasePersistenceSettings: Pl
 
     val scanner = newScanner()
 
-    val start = RowKey.firstForProcessor(persistenceId)
+    val start = RowKey.firstForPersistenceId(persistenceId)
     val stop = RowKey(persistenceId, criteria.maxSequenceNr)
 
     scanner.setStartKey(start.toBytes)
