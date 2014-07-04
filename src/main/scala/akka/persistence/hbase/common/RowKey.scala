@@ -65,6 +65,14 @@ object RowKey {
     else
       sequenceNr % journalConfig.partitionCount
 
+  val RowKeyPattern = """\d+-.*-\d""".r
+
+  def extractSeqNr(rowKey: Array[Byte]): Long = {
+    val num = rowKey.reverse.takeWhile(_.toChar.isDigit).reverse // todo: make faster
+    Bytes.toString(num).toLong
+  }
+
+
   /** INTERNAL API */
   @tailrec private[hbase] def lastSeqNrInPartition(p: Long, i: Long = Long.MaxValue): Long = if (i % p == 0) i else lastSeqNrInPartition(p, i - 1)
 

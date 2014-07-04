@@ -38,12 +38,12 @@ trait AsyncBaseUtils {
     }
 
     protected def deleteRow(key: Array[Byte]): Future[Unit] = {
-      println(s"Permanently deleting row: ${Bytes.toString(key)}")
+//      println(s"Permanently deleting row: ${Bytes.toString(key)}")
       executeDelete(key)
     }
 
     protected def markRowAsDeleted(key: Array[Byte]): Future[Unit] = {
-      println(s"Marking as deleted, for row: ${Bytes.toString(key)}")
+//      println(s"Marking as deleted, for row: ${Bytes.toString(key)}")
       executePut(key, Array(Marker), Array(DeletedMarkerBytes))
     }
 

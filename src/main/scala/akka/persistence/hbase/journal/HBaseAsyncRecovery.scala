@@ -30,9 +30,6 @@ trait HBaseAsyncRecovery extends AsyncRecovery {
   override implicit val pluginDispatcher = context.system.dispatchers.lookup(replayDispatcherId)
 
   import akka.persistence.hbase.common.Columns._
-  import akka.persistence.hbase.common.DeferredConversions._
-
-import scala.collection.JavaConverters._
 
   // async recovery plugin impl
 
@@ -61,17 +58,9 @@ import scala.collection.JavaConverters._
 
         log.info("Scanning {} partition, from {} to {}", part, startScanKey.toKeyString, stopScanKey.toKeyString)
 
-        val scan = new Scan
-        scan.setStartRow(startScanKey.toBytes) // inclusive
-        scan.setStopRow(stopScanKey.toBytes) // exclusive
-        scan.setBatch(hBasePersistenceSettings.scanBatchSize)
-
-        scan.addColumn(FamilyBytes, Marker)
-        scan.addColumn(FamilyBytes, Message)
-
-        scan.setFilter(new RowFilter(CompareOp.EQUAL, new RegexStringComparator(persistenceIdRowRegex)))
-
+        val scan = preparePartitionScan(startScanKey, stopScanKey, persistenceIdRowRegex, onlyRowKeys = false)
         val scanner = hTable.getScanner(scan)
+
         var lowestSeqNr: Long = 0L
 
         def resequenceMsg(persistentRepr: PersistentRepr) {
@@ -150,36 +139,101 @@ import scala.collection.JavaConverters._
   override def asyncReadHighestSequenceNr(persistenceId: String, fromSequenceNr: Long): Future[Long] = {
     log.debug(s"Async read for highest sequence number for persistenceId: [$persistenceId] (hint, seek from  nr: [$fromSequenceNr])")
 
-    val scanner = newScanner()
-    scanner.setStartKey(RowKey(selectPartition(fromSequenceNr), persistenceId, fromSequenceNr).toBytes)
-    scanner.setStartKey(RowKey.lastForPersistenceId(persistenceId).toBytes)
-    scanner.setKeyRegexp(RowKey.patternForProcessor(persistenceId))
+    val partitions = hBasePersistenceSettings.partitionCount
 
-    def handleRows(in: AnyRef): Future[Long] = in match {
-      case null =>
-        scanner.close()
-        Future(0)
+    def scanPartitionForMaxSeqNr(part: Long): Long = {
+      val startScanKey = RowKey.firstInPartition(persistenceId, part, fromSequenceNr) // 021-ID-0000000000000000021
+      val stopScanKey = RowKey.lastInPartition(persistenceId, part)                   // 021-ID-9223372036854775897
+      val persistenceIdRowRegex = RowKey.patternForProcessor(persistenceId)           //  .*-ID-.*
 
-      case rows: AsyncBaseRows =>
-        log.debug(s"AsyncReadHighestSequenceNr - got ${rows.size} rows...")
-        
-        val maxSoFar = rows.asScala.map(cols => sequenceNr(cols.asScala)).max
-          
-        go() map { reachedSeqNr =>
-          math.max(reachedSeqNr, maxSoFar)
+      log.info("Scanning {} partition, from {} to {}", part, startScanKey.toKeyString, stopScanKey.toKeyString)
+
+      val scan = preparePartitionScan(startScanKey, stopScanKey, persistenceIdRowRegex, onlyRowKeys = true)
+      val scanner = hTable.getScanner(scan)
+
+      var highestSeqNr: Long = 0L
+
+      try {
+        var res = scanner.next()
+        while (res != null) {
+          println("res.getRow = " + Bytes.toString(res.getRow))
+          val seqNr = RowKey.extractSeqNr(res.getRow)
+          println("seqNr = " + seqNr)
+          highestSeqNr = math.max(highestSeqNr, seqNr)
+//          val persistentRepr = persistentFromBytes(CellUtil.cloneValue(messageCell))
+          res = scanner.next()
         }
+        highestSeqNr
+      } finally {
+        log.debug("Done scheduling replays in partition {} (highest seqNr: {})", part, highestSeqNr)
+        scanner.close()
+      }
     }
 
-    def go() = scanner.nextRows(hBasePersistenceSettings.scanBatchSize) flatMap handleRows
-
-    go() map { case l =>
-      log.debug("Finished scanning for highest sequence number: {}", l)
-      l
+    val partitionScans = (1 to partitions).map(i => Future { scanPartitionForMaxSeqNr(i) })
+    Future.sequence(partitionScans) map {
+      case seqNrs if seqNrs.isEmpty => 0L
+      case seqNrs => seqNrs.max
+    } map { seqNr =>
+      log.info("Found highest seqNr for persistenceId: {}, it's: {}", persistenceId, seqNr)
+      seqNr
     }
+
+
+
+//    val scanner = newScanner()
+//    scanner.setStartKey(RowKey(selectPartition(fromSequenceNr), persistenceId, fromSequenceNr).toBytes)
+//    scanner.setStartKey(RowKey.lastForPersistenceId(persistenceId).toBytes)
+//    scanner.setKeyRegexp(RowKey.patternForProcessor(persistenceId))
+//
+//    def handleRows(in: AnyRef): Future[Long] = in match {
+//      case null =>
+//        scanner.close()
+//        Future(0)
+//
+//      case rows: AsyncBaseRows =>
+//        log.debug(s"AsyncReadHighestSequenceNr - got ${rows.size} rows...")
+//
+//        val maxSoFar = rows.asScala.map(cols => sequenceNr(cols.asScala)).max
+//
+//        go() map { reachedSeqNr =>
+//          math.max(reachedSeqNr, maxSoFar)
+//        }
+//    }
+//
+//    def go() = scanner.nextRows(hBasePersistenceSettings.scanBatchSize) flatMap handleRows
+//
+//    go() map { case l =>
+//      log.debug("Finished scanning for highest sequence number: {}", l)
+//      l
+//    }
   }
 
 
 //  end of async recovery plugin impl
+
+  private def preparePartitionScan(startScanKey: RowKey, stopScanKey: RowKey, persistenceIdRowRegex: String, onlyRowKeys: Boolean): Scan = {
+    val scan = new Scan
+    scan.setStartRow(startScanKey.toBytes) // inclusive
+    scan.setStopRow(stopScanKey.toBytes) // exclusive
+    scan.setBatch(hBasePersistenceSettings.scanBatchSize)
+
+    val filter = if (onlyRowKeys) {
+      val fl = new FilterList()
+      fl.addFilter(new FirstKeyOnlyFilter)
+      fl.addFilter(new KeyOnlyFilter)
+      fl.addFilter(new RowFilter(CompareOp.EQUAL, new RegexStringComparator(persistenceIdRowRegex)))
+      fl
+    } else {
+      scan.addColumn(FamilyBytes, Marker)
+      scan.addColumn(FamilyBytes, Message)
+
+      new RowFilter(CompareOp.EQUAL, new RegexStringComparator(persistenceIdRowRegex))
+    }
+
+    scan.setFilter(filter)
+    scan
+  }
 
   private def sequenceNr(columns: mutable.Buffer[KeyValue]): Long = {
     val messageKeyValue = findColumn(columns, Message)
