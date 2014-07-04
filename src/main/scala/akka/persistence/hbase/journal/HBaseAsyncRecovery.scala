@@ -50,6 +50,8 @@ import scala.collection.JavaConverters._
       val stopScanKey = RowKey.lastInPartition(persistenceId, part)         // 021-ID-9223372036854775800
       val persistenceIdRowRegex = RowKey.patternForProcessor(persistenceId) //  .*-ID-.*
 
+      log.info("Scanning {} partition, from {} to {}", part, startScanKey.toKeyString, stopScanKey.toKeyString)
+
       val scan = new Scan
       scan.setStartRow(startScanKey.toBytes) // inclusive
       scan.setStopRow(stopScanKey.toBytes) // exclusive

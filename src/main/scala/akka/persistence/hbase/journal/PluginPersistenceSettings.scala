@@ -41,7 +41,7 @@ object PluginPersistenceSettings {
       replayDispatcherId   = journalConfig.getString("replay-dispatcher"),
       publishTestingEvents = journalConfig.getBoolean("publish-testing-events"),
       snapshotHdfsDir      = snapshotConfig.getString("snapshot-dir"),
-      hadoopConfiguration  = HBaseJournalInit.getHBaseConfig(rootConfig)
+      hadoopConfiguration  = if (rootConfig ne null) HBaseJournalInit.getHBaseConfig(rootConfig) else null
     )
   }
 }

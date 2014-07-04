@@ -31,17 +31,24 @@ object RowKey {
     require(partition > 0, "partition must be > 0")
     require(partition <= journalConfig.partitionCount, "partition must be <= partitionCount")
 
-    RowKey.apply(persistenceId, partition % journalConfig.partitionCount)
+    if (partition == journalConfig.partitionCount)
+      RowKey.apply(persistenceId, partition)
+    else
+      RowKey.apply(persistenceId, partition % journalConfig.partitionCount)
   }
 
   def lastInPartition(persistenceId: String, partition: Long)(implicit journalConfig: PluginPersistenceSettings) = {
     require(partition > 0, s"partition must be > 0, ($partition)")
     require(partition <= journalConfig.partitionCount, s"partition must be <= partitionCount, ($partition <!= ${journalConfig.partitionCount})")
 
-    @tailrec def lastSeqNrInPartition(p: Long, i: Long = Long.MaxValue): Long = if (i % p == 0) i else lastSeqNrInPartition(p, i - 1)
-
-    RowKey.apply(persistenceId, lastSeqNrInPartition(partition))
+    val p = partition
+    new RowKey(persistenceId, lastSeqNrInPartition(partition)) {
+      override def part = p % journalConfig.partitionCount
+    }
   }
+
+  /** INTERNAL API */
+  @tailrec private[hbase] def lastSeqNrInPartition(p: Long, i: Long = Long.MaxValue): Long = if (i % p == 0) i else lastSeqNrInPartition(p, i - 1)
 
   /** First key possible, similar to: `000-id-000000000000000000000` */
   def firstForProcessor(persistenceId: String)(implicit journalConfig: PluginPersistenceSettings) =
