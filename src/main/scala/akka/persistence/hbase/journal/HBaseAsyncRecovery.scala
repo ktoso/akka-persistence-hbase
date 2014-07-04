@@ -72,7 +72,7 @@ import scala.collection.JavaConverters._
         scan.setFilter(new RowFilter(CompareOp.EQUAL, new RegexStringComparator(persistenceIdRowRegex)))
 
         val scanner = hTable.getScanner(scan)
-        var resequencedMessages: Long = 0L
+        var lowestSeqNr: Long = 0L
         try {
           var res = scanner.next()
           while (res != null) {
@@ -94,18 +94,18 @@ import scala.collection.JavaConverters._
                   val seqNr = persistentRepr.sequenceNr
                   if (fromSequenceNr <= seqNr && seqNr <= toSequenceNr) {
                     resequencer ! persistentRepr
-                    resequencedMessages += 1
+                    lowestSeqNr = seqNr
                   }
 
                 case "S" =>
-                // thanks to treating Snapshot rows as deleted entries, we won't suddenly apply a Snapshot() where the
-                // our Processor expects a normal message. This is implemented for the HBase backed snapshot storage,
-                // if you use the HDFS storage there won't be any snapshot entries in here.
-                // As for message deletes: if we delete msgs up to seqNr 4, and snapshot was at 3, we want to delete it anyway.
-                // treat as deleted, ignore...
+                  // thanks to treating Snapshot rows as deleted entries, we won't suddenly apply a Snapshot() where the
+                  // our Processor expects a normal message. This is implemented for the HBase backed snapshot storage,
+                  // if you use the HDFS storage there won't be any snapshot entries in here.
+                  // As for message deletes: if we delete msgs up to seqNr 4, and snapshot was at 3, we want to delete it anyway.
+                  // treat as deleted, ignore...
 
                 case "D" =>
-                // marked as deleted, ignore...
+                  // marked as deleted, ignore...
 
                 case _ =>
                   // channel confirmation
@@ -117,17 +117,23 @@ import scala.collection.JavaConverters._
             }
             res = scanner.next()
           }
-          resequencedMessages
+          lowestSeqNr
         } finally {
-          log.debug("Done scheduling replays in partition {} (scheduled: {})", part, resequencedMessages)
+          log.debug("Done scheduling replays in partition {} (lowest seqNr: {})", part, lowestSeqNr)
           scanner.close()
-
-          resequencedMessages
         }
       }
 
       val partitionScans = (1 to partitions).map(i => Future { scanPartition(i, resequencer) })
-      Future.sequence(partitionScans) onComplete { _ => resequencer ! AllPersistentsSubmitted}
+      Future.sequence(partitionScans) onSuccess {
+        case lowestSeqNrInEachPartition =>
+          val seqNrs = lowestSeqNrInEachPartition.filterNot(_ == 0L).toList
+
+          if (seqNrs.nonEmpty)
+            resequencer ! AllPersistentsSubmitted(assumeSequenceStartsAt = seqNrs.min)
+          else
+            resequencer ! AllPersistentsSubmitted(assumeSequenceStartsAt = 0)
+      }
 
       reachedSeqNrPromise.future map { case _ =>
         log.info("Completed recovery scanning for persistenceId {}", persistenceId)
@@ -190,7 +196,7 @@ import scala.collection.JavaConverters._
  * @param sequenceStartsAt since we support partial replays (from 4 to 100), the resequencer must know when to start replaying
  */
 private[hbase] class Resequencer(
-    sequenceStartsAt: Long,
+    private var sequenceStartsAt: Long,
     maxMsgsToSequence: Long,
     replayCallback: PersistentRepr => Unit,
     loopedMaxFlag: AtomicBoolean,
@@ -207,10 +213,26 @@ private[hbase] class Resequencer(
 
   def receive = {
     case p: PersistentRepr ⇒
-      log.info("Resequencing {} from {}; Delivered until {} already", p.payload, p.sequenceNr, deliveredSeqNr)
+      log.debug("Resequencing {} from {}; Delivered until {} already", p.payload, p.sequenceNr, deliveredSeqNr)
       resequence(p)
 
-    case AllPersistentsSubmitted =>
+    case AllPersistentsSubmitted(assumeSequenceStartsAt) =>
+      log.info("assumeSequenceStartsAt = " + assumeSequenceStartsAt)
+      log.info("deliveredMsgs = " + deliveredMsgs)
+      log.info("delayed = " + delayed)
+
+      if (deliveredMsgs == 0L) {
+        // kick off recovery from the assumed lowest seqNr
+        // could be not 1 because of permanent deletion, yet replay was requested from 1
+        this.sequenceStartsAt = assumeSequenceStartsAt
+        this.deliveredSeqNr = sequenceStartsAt - 1
+
+        log.info("this.deliveredSeqNr = sequenceStartsAt - 1 = " + (sequenceStartsAt - 1))
+
+        val ro = delayed.remove(deliveredSeqNr + 1)
+        if (ro.isDefined) resequence(ro.get)
+      }
+
       if (delayed.isEmpty) completeResequencing()
       else allSubmitted = true
   }
@@ -251,5 +273,5 @@ private[hbase] object Resequencer {
   def props(sequenceStartsAt: Long, maxMsgsToSequence: Long, replayCallback: PersistentRepr => Unit, loopedMaxFlag: AtomicBoolean, reachedSeqNr: Promise[Long], dispatcherId: String) =
     Props(classOf[Resequencer], sequenceStartsAt, maxMsgsToSequence, replayCallback, loopedMaxFlag, reachedSeqNr).withDispatcher(dispatcherId) // todo stop it at some point
 
-  case object AllPersistentsSubmitted
+  final case class AllPersistentsSubmitted(assumeSequenceStartsAt: Long)
 }

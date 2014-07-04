@@ -9,6 +9,7 @@ import com.google.common.base.Stopwatch
 import org.apache.hadoop.hbase.client.{HTable, Scan}
 import org.apache.hadoop.hbase.filter.CompareFilter.CompareOp
 import org.apache.hadoop.hbase.filter._
+import org.apache.hadoop.hbase.util.Bytes
 
 import scala.collection.immutable
 import scala.concurrent._
@@ -76,10 +77,12 @@ class HBaseAsyncWriteJournal extends Actor with ActorLogging
     // prepare delete function (delete or mark as deleted)
     val doDelete = deleteFunctionFor(permanent)
 
-    def enqueueDeleteOps(operator: ActorRef): Unit = {
-      val startScanKey = RowKey.firstForPersistenceId(persistenceId)                 // 000-ID-000000000000
-      val stopScanKey = RowKey.lastForPersistenceId(persistenceId, toSequenceNr + 1) // 999-ID-0000[seqNr]
-      val persistenceIdRowRegex = RowKey.patternForProcessor(persistenceId)          //  .*-ID-.*
+    def scanAndDeletePartition(part: Long, operator: ActorRef): Unit = {
+      val startScanKey = RowKey.firstInPartition(persistenceId, part)             // 021-ID-000000000000000000
+      val stopScanKey = RowKey.lastInPartition(persistenceId, part, toSequenceNr) // 021-ID-9223372036854775800
+      val persistenceIdRowRegex = RowKey.patternForProcessor(persistenceId)       //  .*-ID-.*
+
+      log.debug("Scanning for keys to delete, start: {}, stop: {}, regex: {}", startScanKey.toKeyString, stopScanKey.toKeyString, persistenceIdRowRegex)
 
       val scan = new Scan
       scan.setStartRow(startScanKey.toBytes)
@@ -92,10 +95,7 @@ class HBaseAsyncWriteJournal extends Actor with ActorLogging
       fl.addFilter(new RowFilter(CompareOp.EQUAL, new RegexStringComparator(persistenceIdRowRegex)))
       scan.setFilter(fl)
 
-      log.debug("Scanning for keys to delete, start: {}, stop: {}, regex: {}", startScanKey.toKeyString, stopScanKey.toKeyString, persistenceIdRowRegex)
-
       val scanner = hTable.getScanner(scan)
-
       try {
         var res = scanner.next()
         while (res != null) {
@@ -103,15 +103,16 @@ class HBaseAsyncWriteJournal extends Actor with ActorLogging
           res = scanner.next()
         }
       } finally {
-        operator ! AllOpsSubmitted
         scanner.close()
       }
     }
 
     val deleteRowsPromise = Promise[Unit]()
-
     val operator = context.actorOf(Operator.props(deleteRowsPromise, doDelete, hBasePersistenceSettings.pluginDispatcherId))
-    Future { enqueueDeleteOps(operator) }
+
+    val partitions = hBasePersistenceSettings.partitionCount
+    val partitionScans = (1 to partitions).map(partitionNr => Future { scanAndDeletePartition(partitionNr, operator) })
+    Future.sequence(partitionScans) onComplete { _ => operator ! AllOpsSubmitted }
 
     deleteRowsPromise.future map { case _ =>
       log.debug("Finished deleting messages for persistenceId: {}, to sequenceNr: {}, permanent: {} (took: {})", persistenceId, toSequenceNr, permanent, watch.stop())
@@ -193,7 +194,7 @@ private[hbase] class Operator(finish: Promise[Unit], op: Array[Byte] => Future[U
 
   def receive = {
     case key: Array[Byte] =>
-//      log.debug("Scheduling op on: {}", Bytes.toString(key))
+      log.debug("Scheduling op on: {}", Bytes.toString(key))
       totalOps += 1
       op(key) foreach { _ => self ! OpApplied(key) }
 
