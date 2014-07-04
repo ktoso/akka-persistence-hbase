@@ -2,16 +2,20 @@ package akka.persistence.hbase.journal
 
 import java.{util => ju}
 
-import akka.actor.{Actor, ActorLogging}
+import akka.actor.{Actor, ActorLogging, ActorRef, Props}
 import akka.persistence.PersistentRepr
 import akka.persistence.hbase.common.RowKey
+import akka.persistence.hbase.journal.Resequencer.AllPersistentsSubmitted
 import akka.persistence.journal._
+import org.apache.hadoop.hbase.client.Scan
+import org.apache.hadoop.hbase.filter.CompareFilter.CompareOp
+import org.apache.hadoop.hbase.filter._
 import org.apache.hadoop.hbase.util.Bytes
 import org.hbase.async.{HBaseClient, KeyValue}
 
 import scala.annotation.switch
 import scala.collection.mutable
-import scala.concurrent.Future
+import scala.concurrent.{Future, Promise}
 
 trait HBaseAsyncRecovery extends AsyncRecovery {
   this: Actor with ActorLogging with HBaseAsyncWriteJournal =>
@@ -27,7 +31,7 @@ trait HBaseAsyncRecovery extends AsyncRecovery {
   import akka.persistence.hbase.common.Columns._
   import akka.persistence.hbase.common.DeferredConversions._
   import akka.persistence.hbase.journal.RowTypeMarkers._
-
+  
 import scala.collection.JavaConverters._
 
   // async recovery plugin impl
@@ -37,37 +41,123 @@ import scala.collection.JavaConverters._
                                   (replayCallback: PersistentRepr => Unit): Future[Unit] = {
     log.debug(s"Async replay for persistenceId [$persistenceId], from sequenceNr: [$fromSequenceNr], to sequenceNr: [$toSequenceNr]")
 
-    val scanner = newScanner()
-    scanner.setStartKey(RowKey(persistenceId, fromSequenceNr).toBytes)
-    scanner.setStopKey(RowKey(persistenceId, toSequenceNr).toBytes)
-    scanner.setKeyRegexp(RowKey.patternForProcessor(persistenceId))
+    val reachedSeqNrPromise = Promise[Long]()
+    val resequencer = context.actorOf(Resequencer.props(replayCallback, reachedSeqNrPromise, replayDispatcherId))
 
-    scanner.setMaxNumRows(hBasePersistenceSettings.scanBatchSize)
+    val partitions = hBasePersistenceSettings.partitionCount
 
-    val callback = replay(replayCallback) _
+    def scanPartition(part: Long, resequencer: ActorRef): Long = {
+      val startScanKey = RowKey.firstInPartition(persistenceId, part)       // 021-ID-0000000000000000021
+      val stopScanKey = RowKey.lastInPartition(persistenceId, part)         // 021-ID-9223372036854775800
+      val persistenceIdRowRegex = RowKey.patternForProcessor(persistenceId) //  .*-ID-.*
 
-    def handleRows(in: AnyRef): Future[Long] = in match {
-      case null =>
-        log.debug("replayAsync - finished!")
-        scanner.close()
-        Future(0L)
+      val scan = new Scan
+      scan.setStartRow(startScanKey.toBytes) // inclusive
+      scan.setStopRow(stopScanKey.toBytes) // exclusive
 
-      case rows: AsyncBaseRows =>
-        log.debug(s"replayAsync - got ${rows.size} rows...")
+      val fl = new FilterList()
+      fl.addFilter(new FirstKeyOnlyFilter)
+      fl.addFilter(new KeyOnlyFilter)
+      fl.addFilter(new RowFilter(CompareOp.EQUAL, new RegexStringComparator(persistenceIdRowRegex)))
+      scan.setFilter(fl)
 
-        val seqNrs = for {
-          row <- rows.asScala
-          cols = row.asScala
-        } yield callback(cols)
+      val scanner = hTable.getScanner(scan)
+      var scheduled = 0L
+      try {
+        var res = scanner.next()
+        while (res != null) {
 
-        go() map { reachedSeqNr =>
-          math.max(reachedSeqNr, seqNrs.max)
+          val markerCells = res.getColumnCells(FamilyBytes, Marker)
+          val messageCells = res.getColumnCells(FamilyBytes, Message)
+
+          if (!markerCells.isEmpty && !messageCells.isEmpty) {
+            val markerCell = markerCells.get(0)
+            val messageCell = markerCells.get(0)
+
+            val marker = Bytes.toString(markerCell.getValueArray)
+
+            marker match {
+              case "A" =>
+                val persistentRepr = persistentFromBytes(messageCell.getValueArray)
+
+                val seqNr = persistentRepr.sequenceNr
+                if (fromSequenceNr <= seqNr && seqNr <= toSequenceNr) {
+                  log.debug("Scheduling replay of {} @ {}", persistentRepr.payload, seqNr)
+                  resequencer ! persistentRepr
+                  scheduled += 1
+                }
+
+              case "S" =>
+                // todo, snapshot
+
+              case "D" =>
+                // deleted, we don't care
+
+              case _ =>
+                // todo
+            }
+          }
+          res = scanner.next()
         }
+        scheduled
+      } finally {
+        log.debug("Done scheduling replays in partition {} (scheduled: {})", part, scheduled)
+        scanner.close()
+
+        scheduled
+      }
     }
 
-    def go() = scanner.nextRows() flatMap handleRows
+    val partitionScans = (1 to partitions).map(i => Future { scanPartition(i, resequencer) })
+    Future.sequence(partitionScans) onComplete { _ => resequencer ! AllPersistentsSubmitted }
 
-    go()
+//    val scanner = newScanner()
+//    scanner.setStartKey(RowKey(persistenceId, fromSequenceNr).toBytes)
+//    scanner.setStopKey(RowKey.lastForProcessorScan(persistenceId, toSequenceNr).toBytes)
+//    scanner.setKeyRegexp(RowKey.patternForProcessor(persistenceId))
+//
+//    scanner.setMaxNumRows(hBasePersistenceSettings.scanBatchSize)
+//
+//
+//
+//    def handleRows(in: AnyRef): Future[Long] = in match {
+//      case null =>
+//        log.debug("replayAsync - finished scheduling!")
+//        resequencer ! AllPersistentsSubmitted
+//        scanner.close()
+//        Future(0L)
+//
+//      case rows: AsyncBaseRows =>
+//        log.debug(s"replayAsync - got ${rows.size} rows...")
+//
+//        for {
+//          row <- rows.asScala
+//          cols = row.asScala
+//
+//          // convert and resequence
+//          markerKeyValue = findColumn(cols, Marker)
+//          marker = Bytes.toString(markerKeyValue.value)
+//
+//          // if it's NOT deleted, we pass it on (can be: Actual, Snapshot, Confirmation)
+//          if marker != RowTypeMarkers.DeletedMarker
+//
+//          messageKeyValue = findColumn(cols, Message)
+//          persistentRepr = persistentFromBytes(messageKeyValue.value)
+//        } yield {
+//          log.info("Scheduling replay of {} @ {}", persistentRepr.payload, persistentRepr.sequenceNr)
+//          resequencer ! persistentRepr
+//        }
+//
+//        go()
+//    }
+//
+//    def go() = scanner.nextRows() flatMap handleRows
+//
+//    go()
+//
+    reachedSeqNrPromise.future map { case _ =>
+      log.info("Completed playback!")
+    }
   }
 
   // todo make this multiple scans, on each partition instead of one big scan
@@ -80,7 +170,6 @@ import scala.collection.JavaConverters._
 
     def handleRows(in: AnyRef): Future[Long] = in match {
       case null =>
-        log.debug("AsyncReadHighestSequenceNr finished")
         scanner.close()
         Future(0)
 
@@ -96,10 +185,15 @@ import scala.collection.JavaConverters._
 
     def go() = scanner.nextRows() flatMap handleRows
 
-    go()
+    go() map { case l =>
+      log.debug("Finished scanning for highest sequence number: {}", l)
+      l
+    }
   }
 
-  private def replay(replayCallback: (PersistentRepr) => Unit)(columns: mutable.Buffer[KeyValue]): Long = {
+  // TODO HANDLE OTHER MARKER TYPES, COPY CODE FROM HERE
+  @deprecated("Instead use the resequencer")
+  private def replay(replayCallback: PersistentRepr => Unit)(columns: mutable.Buffer[KeyValue]): Long = {
     val messageKeyValue = findColumn(columns, Message)
     var msg = persistentFromBytes(messageKeyValue.value)
 
@@ -138,4 +232,60 @@ import scala.collection.JavaConverters._
     msg.sequenceNr
   }
 
+}
+
+/**
+ * This is required because of the way we store messages in the HTable (prefixed with a seed, in order to avoid the "hot-region problem").
+ *
+ * Note: The hot-region problem is when a lot of traffic goes to exactly one region, while the other regions "do nothing".
+ *       This problem happens esp. with sequential numbering - such as the sequenceNr. The prefix-seeding solves this problem
+ *       but it introduces out-of-sequence order scanning (a scan will read 000-a-05 before 001-a-01), which is wy the [[Resequencer]] is needed.
+ *
+ * @param replayCallback the callback which we want to call with sequenceNr ascending-order messages
+ */
+private[hbase] class Resequencer(replayCallback: PersistentRepr => Unit, reachedSeqNr: Promise[Long]) extends Actor with ActorLogging {
+
+  private var allSubmitted = false
+
+  private val delayed = mutable.Map.empty[Long, PersistentRepr]
+  private var delivered = 0L
+
+  import akka.persistence.hbase.journal.Resequencer._
+
+  def receive = {
+    case d: PersistentRepr ⇒ resequence(d)
+    case AllPersistentsSubmitted =>
+      if (delayed.isEmpty) completeResequencing()
+      else allSubmitted = true
+  }
+
+  @scala.annotation.tailrec
+  private def resequence(p: PersistentRepr) {
+    if (p.sequenceNr == delivered + 1) {
+      log.debug("Applying replay of {} @ {}", p.payload, p.sequenceNr)
+      delivered = p.sequenceNr
+      replayCallback(p)
+
+      if (allSubmitted && delayed.isEmpty)
+        completeResequencing()
+    } else {
+      delayed += (p.sequenceNr -> p)
+    }
+
+    val ro = delayed.remove(delivered + 1)
+    if (ro.isDefined) resequence(ro.get)
+  }
+
+  private def completeResequencing() {
+    log.debug("All messages have been resequenced and applied (until seqNr: {})!", delivered)
+    reachedSeqNr success delivered
+    context stop self
+  }
+}
+
+private[hbase] object Resequencer {
+  def props(replayCallback: PersistentRepr => Unit, reachedSeqNr: Promise[Long], dispatcherId: String) =
+    Props(classOf[Resequencer], replayCallback, reachedSeqNr).withDispatcher(dispatcherId) // todo stop it at some point
+
+  case object AllPersistentsSubmitted
 }

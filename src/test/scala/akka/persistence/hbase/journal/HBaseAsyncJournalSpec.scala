@@ -23,16 +23,18 @@ object HBaseAsyncJournalSpec {
       case RecoveryCompleted => // do nothing...
 
       case payload if recoveryRunning =>
-        log.debug("Recovering, got {} @ {} ({})", payload, lastSequenceNr, getCurrentPersistentMessage)
-        sender() ! payload
-        sender() ! lastSequenceNr
-        sender() ! recoveryRunning
+        log.debug("Recovering, got [{}] @ {} ({})", payload, currentPersistentMessage.map(_.sequenceNr).get, getCurrentPersistentMessage)
+        testActor ! payload
+        testActor ! currentPersistentMessage.map(_.sequenceNr).get
+        testActor ! recoveryRunning
 
       case payload =>
+        log.debug("Got payload {}, persisting...", payload)
+
         persist(payload) { p =>
-          log.debug("Not in recovery, got {} @ {}", payload, lastSequenceNr)
+          log.debug("Not in recovery, got [{}] @ {}", payload, currentPersistentMessage.map(_.sequenceNr).get)
           testActor ! payload
-          testActor ! lastSequenceNr
+          testActor ! currentPersistentMessage.map(_.sequenceNr).get
           testActor ! recoveryRunning
         }
     }
@@ -60,57 +62,95 @@ with Matchers with BeforeAndAfterAll {
   }
 
   it should "write and replay messages" in {
-    val processor1 = system.actorOf(Props(classOf[MyPersistentActor], self, "p1"))
-    info("p1 = " + processor1)
+    val a1 = system.actorOf(Props(classOf[MyPersistentActor], self, "p1"))
 
-    processor1 ! "a"
-    processor1 ! "aa"
+    a1 ! "a"
+    a1 ! "aa"
     expectMsgAllOf(max = timeout, "a", 1L, false)
     expectMsgAllOf(max = timeout, "aa", 2L, false)
 
-    val processor2 = system.actorOf(Props(classOf[MyPersistentActor], self, "p1"))
-    processor2 ! "b"
-    processor2 ! "c"
+    val a2 = system.actorOf(Props(classOf[MyPersistentActor], self, "p1"))
+    a2 ! "b"
+    a2 ! "c"
     expectMsgAllOf(max = timeout, "a", 1L, true)
     expectMsgAllOf(max = timeout, "aa", 2L, true)
     expectMsgAllOf(max = timeout, "b", 3L, false)
     expectMsgAllOf(max = timeout, "c", 4L, false)
   }
 
-  it should "not replay messages marked as deleted" in {
-    val deleteProbe = TestProbe()
-    subscribeToDeletion(deleteProbe)
-
-    val processor1 = system.actorOf(Props(classOf[MyPersistentActor], self, "p2"))
-    processor1 ! "a"
-    processor1 ! "b"
-    expectMsgAllOf(max = timeout, "a", 1L, false)
-    expectMsgAllOf(max = timeout, "b", 2L, false)
-    processor1 ! DeleteUntil(1L, permanent = false)
-
-    awaitDeletion(deleteProbe)
-
-    system.actorOf(Props(classOf[MyPersistentActor], self, "p2"))
-    expectMsgAllOf(max = timeout, "b", 2L, true)
-  }
-
   it should "not replay permanently deleted messages" in {
     val deleteProbe = TestProbe()
     subscribeToDeletion(deleteProbe)
 
-    val processor1 = system.actorOf(Props(classOf[MyPersistentActor], self, "p3"))
-    processor1 ! "a"
-    processor1 ! "b"
+    val a1 = system.actorOf(Props(classOf[MyPersistentActor], self, "p2"))
+    a1 ! "a"
+    a1 ! "b"
+    a1 ! "c"
+    a1 ! "d"
     expectMsgAllOf(max = timeout, "a", 1L, false)
     expectMsgAllOf(max = timeout, "b", 2L, false)
-    processor1 ! DeleteUntil(1L, permanent = true)
+    expectMsgAllOf(max = timeout, "c", 3L, false)
+    expectMsgAllOf(max = timeout, "d", 4L, false)
+    a1 ! DeleteUntil(2L, permanent = true)
+    awaitDeletion(deleteProbe)
+
+    val a2 = system.actorOf(Props(classOf[MyPersistentActor], self, "p2"))
+    a2 ! "e"
+    expectMsgAllOf("c", 3L, true)
+    expectMsgAllOf("d", 4L, true)
+    expectMsgAllOf("e", 5L, false)
+  }
+
+  it should "not replay messages marked as deleted" in {
+    val deleteProbe = TestProbe()
+    subscribeToDeletion(deleteProbe)
+
+    val a = system.actorOf(Props(classOf[MyPersistentActor], self, "p3"))
+    a ! "a"
+    a ! "b"
+    expectMsgAllOf(max = timeout, "a", 1L, false)
+    expectMsgAllOf(max = timeout, "b", 2L, false)
+    a ! DeleteUntil(1L, permanent = false)
+
     awaitDeletion(deleteProbe)
 
     system.actorOf(Props(classOf[MyPersistentActor], self, "p3"))
-    expectMsgAllOf("b", 2L, true)
+    expectMsgAllOf(max = timeout, "b", 2L, true)
   }
 
-  // is assured, but no test yet
+  lazy val settings = PluginPersistenceSettings(system.settings.config)
+
+  it should "delete exactly as much as needed messages" in {
+    val deleteProbe = TestProbe()
+    subscribeToDeletion(deleteProbe)
+
+    val a = system.actorOf(Props(classOf[MyPersistentActor], self, "p4"))
+
+    val partitionRange = 1 to settings.partitionCount
+
+    partitionRange foreach { i =>
+      a ! s"msg-$i"
+      expectMsgAllOf(max = timeout, s"msg-$i", i.toLong, false)
+    }
+    a ! "next-1"
+    a ! "next-2"
+    a ! "next-3"
+
+    a ! DeleteUntil(partitionRange.size, permanent = true)
+    awaitDeletion(deleteProbe)
+
+    val p2 = TestProbe()
+    system.actorOf(Props(classOf[MyPersistentActor], p2.ref, "p4"))
+    p2.fishForMessage(max = 2.minute, hint = "next-messages") {
+      case x => println(x); false
+//      case "next-1" => false
+//      case "next-2" => false
+//      case "next-3" => true
+//      case other: String => throw new AssertionError(s"Very wrong! must not get ${other} strings!")
+    }
+  }
+
+//  is assured, but no test yet
   it should "don't apply snapshots the same way as messages" in pending
 
 

@@ -9,6 +9,7 @@ import com.google.common.base.Stopwatch
 import org.apache.hadoop.hbase.client.{HTable, Scan}
 import org.apache.hadoop.hbase.filter.CompareFilter.CompareOp
 import org.apache.hadoop.hbase.filter._
+import org.apache.hadoop.hbase.util.Bytes
 
 import scala.collection.immutable
 import scala.concurrent._
@@ -32,6 +33,8 @@ class HBaseAsyncWriteJournal extends Actor with ActorLogging
   lazy val hadoopConfig = HBaseJournalInit.getHBaseConfig(config)
 
   lazy val client = HBaseClientFactory.getClient(hBasePersistenceSettings, new PersistenceSettings(config.getConfig("akka.persistence")))
+
+  lazy val hTable = new HTable(hadoopConfig, Table)
 
   lazy val publishTestingEvents = hBasePersistenceSettings.publishTestingEvents
 
@@ -83,28 +86,25 @@ class HBaseAsyncWriteJournal extends Actor with ActorLogging
       scan.setStopRow(stopScanKey.toBytes)
 
       val fl = new FilterList()
-      fl.addFilter(new RowFilter(CompareOp.EQUAL, new RegexStringComparator(persistenceIdRowRegex)))
       fl.addFilter(new FirstKeyOnlyFilter)
       fl.addFilter(new KeyOnlyFilter)
+      fl.addFilter(new RowFilter(CompareOp.EQUAL, new RegexStringComparator(persistenceIdRowRegex)))
       scan.setFilter(fl)
 
-      log.debug("Scanning for keys to delete, start: {}, stop: {}, regex: {}", startScanKey, stopScanKey, persistenceIdRowRegex)
+      log.debug("Scanning for keys to delete, start: {}, stop: {}, regex: {}", startScanKey.toKeyString, stopScanKey.toKeyString, persistenceIdRowRegex)
 
-      val table = new HTable(hadoopConfig, Table)
+      val scanner = hTable.getScanner(scan)
+
       try {
-        val scanner = table.getScanner(scan)
-
-        try {
-          var res = scanner.next()
-          while (res != null) {
-            operator ! res.getRow
-            res = scanner.next()
-          }
-        } finally {
-          operator ! AllOpsSubmitted
-          scanner.close()
+        var res = scanner.next()
+        while (res != null) {
+          operator ! res.getRow
+          res = scanner.next()
         }
-      } finally table.close()
+      } finally {
+        operator ! AllOpsSubmitted
+        scanner.close()
+      }
     }
 
     val deleteRowsPromise = Promise[Unit]()
@@ -166,7 +166,7 @@ class HBaseAsyncWriteJournal extends Actor with ActorLogging
   }
 
   override def postStop(): Unit = {
-    client.shutdown()
+    try hTable.close() finally client.shutdown()
     super.postStop()
   }
 }
@@ -192,6 +192,7 @@ private[hbase] class Operator(finish: Promise[Unit], op: Array[Byte] => Future[U
 
   def receive = {
     case key: Array[Byte] =>
+      log.info("TO DELETE: " + Bytes.toString(key))
       totalOps += 1
       op(key) foreach { _ => self ! OpApplied(key) }
 
@@ -215,5 +216,5 @@ object Operator {
     Props(classOf[Operator], deleteRowsPromise, doDelete).withDispatcher(dispatcher)
 
   final case class OpApplied(row: Array[Byte])
-  object AllOpsSubmitted
+  case object AllOpsSubmitted
 }

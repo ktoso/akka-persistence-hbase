@@ -39,7 +39,7 @@ object PersistAsyncPerfSpec {
 
     def handlePersisted(p: AnyRef): Unit = {
       if (!recoveryRunning) {
-        log.debug(s"persisted: {} @ {}", p, lastSequenceNr)
+//        log.debug(s"persisted: {} @ {}", p, lastSequenceNr)
         sender() ! s"p-$p"
       }
 
@@ -66,7 +66,7 @@ class PersistAsyncPerfSpec extends TestKit(ActorSystem("test")) with FlatSpecLik
 
   behavior of "HBaseJournal"
 
-  val messagesNr = 1000
+  val messagesNr = 2000
 
   val messages = (1 to messagesNr) map { i => s"hello-$i-(${new Date})" }
   
