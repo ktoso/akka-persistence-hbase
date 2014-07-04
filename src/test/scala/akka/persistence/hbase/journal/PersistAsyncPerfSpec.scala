@@ -21,6 +21,7 @@ object PersistAsyncPerfSpec {
 
     def receiveCommand = {
       case "ask" =>
+        log.info("Got ASK command, lastPersisted = {}", lastPersisted)
         if (lastPersisted != null) {
           log.info("Replying with last persisted message {}", lastPersisted)
           sender() ! lastPersisted
@@ -37,6 +38,12 @@ object PersistAsyncPerfSpec {
         persistAsync(payload)(handlePersisted)
     }
 
+    override def receiveRecover: Receive = {
+      case m: AnyRef =>
+        log.info("Recovered: {}", m)
+        handlePersisted(m)
+    }
+
     def handlePersisted(p: AnyRef): Unit = {
       if (!recoveryRunning) {
 //        log.debug(s"persisted: {} @ {}", p, lastSequenceNr)
@@ -47,10 +54,6 @@ object PersistAsyncPerfSpec {
         case _: String => lastPersisted = p
         case RecoveryCompleted => context.system.eventStream.publish(p)
       }
-    }
-
-    override def receiveRecover: Receive = {
-      case m: AnyRef => handlePersisted(m)
     }
   }
 
@@ -105,7 +108,7 @@ class PersistAsyncPerfSpec extends TestKit(ActorSystem("test")) with FlatSpecLik
 
     replayed ! "ask"
 
-    p.expectMsgType[RecoveryCompleted]
+    p.expectMsgType[RecoveryCompleted](30.seconds)
 
     val last = expectMsgType[String]
     last should startWith ("hello-")

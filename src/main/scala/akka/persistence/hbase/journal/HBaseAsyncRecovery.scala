@@ -7,13 +7,13 @@ import akka.persistence.PersistentRepr
 import akka.persistence.hbase.common.RowKey
 import akka.persistence.hbase.journal.Resequencer.AllPersistentsSubmitted
 import akka.persistence.journal._
+import org.apache.hadoop.hbase.CellUtil
 import org.apache.hadoop.hbase.client.Scan
 import org.apache.hadoop.hbase.filter.CompareFilter.CompareOp
 import org.apache.hadoop.hbase.filter._
 import org.apache.hadoop.hbase.util.Bytes
 import org.hbase.async.{HBaseClient, KeyValue}
 
-import scala.annotation.switch
 import scala.collection.mutable
 import scala.concurrent.{Future, Promise}
 
@@ -30,8 +30,7 @@ trait HBaseAsyncRecovery extends AsyncRecovery {
 
   import akka.persistence.hbase.common.Columns._
   import akka.persistence.hbase.common.DeferredConversions._
-  import akka.persistence.hbase.journal.RowTypeMarkers._
-  
+
 import scala.collection.JavaConverters._
 
   // async recovery plugin impl
@@ -55,9 +54,11 @@ import scala.collection.JavaConverters._
       scan.setStartRow(startScanKey.toBytes) // inclusive
       scan.setStopRow(stopScanKey.toBytes) // exclusive
 
+      scan.addColumn(FamilyBytes, Marker)
+      scan.addColumn(FamilyBytes, Message)
+
       val fl = new FilterList()
-      fl.addFilter(new FirstKeyOnlyFilter)
-      fl.addFilter(new KeyOnlyFilter)
+//      fl.addFilter(new FirstKeyOnlyFilter)
       fl.addFilter(new RowFilter(CompareOp.EQUAL, new RegexStringComparator(persistenceIdRowRegex)))
       scan.setFilter(fl)
 
@@ -67,34 +68,39 @@ import scala.collection.JavaConverters._
         var res = scanner.next()
         while (res != null) {
 
-          val markerCells = res.getColumnCells(FamilyBytes, Marker)
-          val messageCells = res.getColumnCells(FamilyBytes, Message)
+          val markerCell = res.getColumnLatestCell(FamilyBytes, Marker)
+          val messageCell = res.getColumnLatestCell(FamilyBytes, Message)
 
-          if (!markerCells.isEmpty && !messageCells.isEmpty) {
-            val markerCell = markerCells.get(0)
-            val messageCell = markerCells.get(0)
-
-            val marker = Bytes.toString(markerCell.getValueArray)
+          if ((markerCell ne null) && (messageCell ne null)) {
+            val marker = Bytes.toString(CellUtil.cloneValue(markerCell))
 
             marker match {
               case "A" =>
-                val persistentRepr = persistentFromBytes(messageCell.getValueArray)
+                val persistentRepr = persistentFromBytes(CellUtil.cloneValue(messageCell))
 
                 val seqNr = persistentRepr.sequenceNr
+                println("seqNr = " + seqNr + "| in " + part)
                 if (fromSequenceNr <= seqNr && seqNr <= toSequenceNr) {
-                  log.debug("Scheduling replay of {} @ {}", persistentRepr.payload, seqNr)
                   resequencer ! persistentRepr
                   scheduled += 1
                 }
 
               case "S" =>
-                // todo, snapshot
+                // thanks to treating Snapshot rows as deleted entries, we won't suddenly apply a Snapshot() where the
+                // our Processor expects a normal message. This is implemented for the HBase backed snapshot storage,
+                // if you use the HDFS storage there won't be any snapshot entries in here.
+                // As for message deletes: if we delete msgs up to seqNr 4, and snapshot was at 3, we want to delete it anyway.
+                // treat as deleted, ignore...
 
               case "D" =>
-                // deleted, we don't care
+                // marked as deleted, ignore...
 
               case _ =>
-                // todo
+                // channel confirmation
+                val persistentRepr = persistentFromBytes(CellUtil.cloneValue(messageCell))
+
+                val channelId = RowTypeMarkers.extractSeqNrFromConfirmedMarker(marker)
+                replayCallback(persistentRepr.update(confirms = channelId +: persistentRepr.confirms))
             }
           }
           res = scanner.next()
@@ -191,40 +197,8 @@ import scala.collection.JavaConverters._
     }
   }
 
-  // TODO HANDLE OTHER MARKER TYPES, COPY CODE FROM HERE
-  @deprecated("Instead use the resequencer")
-  private def replay(replayCallback: PersistentRepr => Unit)(columns: mutable.Buffer[KeyValue]): Long = {
-    val messageKeyValue = findColumn(columns, Message)
-    var msg = persistentFromBytes(messageKeyValue.value)
 
-    val markerKeyValue = findColumn(columns, Marker)
-    val marker = Bytes.toString(markerKeyValue.value)
-
-    // todo make this a @switch
-    (markerKeyValue.value.head.toChar: @switch) match {
-      case 'A' =>
-        replayCallback(msg)
-
-      case 'D' =>
-        msg = msg.update(deleted = true)
-
-      case 'S' =>
-        // thanks to treating Snapshot rows as deleted entries, we won't suddenly apply a Snapshot() where the
-        // our Processor expects a normal message. This is implemented for the HBase backed snapshot storage,
-        // if you use the HDFS storage there won't be any snapshot entries in here.
-        // As for message deletes: if we delete msgs up to seqNr 4, and snapshot was at 3, we want to delete it anyway.
-        msg = msg.update(deleted = true)
-
-      case _ =>
-        val channelId = extractSeqNrFromConfirmedMarker(marker)
-        msg = msg.update(confirms = channelId +: msg.confirms)
-        replayCallback(msg)
-    }
-
-    msg.sequenceNr
-  }
-
-  // end of async recovery plugin impl
+//  end of async recovery plugin impl
 
   private def sequenceNr(columns: mutable.Buffer[KeyValue]): Long = {
     val messageKeyValue = findColumn(columns, Message)
