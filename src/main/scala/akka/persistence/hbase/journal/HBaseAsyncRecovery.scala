@@ -40,7 +40,7 @@ import scala.collection.JavaConverters._
     log.debug(s"Async replay for persistenceId [$persistenceId], from sequenceNr: [$fromSequenceNr], to sequenceNr: [$toSequenceNr]")
 
     val reachedSeqNrPromise = Promise[Long]()
-    val resequencer = context.actorOf(Resequencer.props(replayCallback, reachedSeqNrPromise, replayDispatcherId))
+    val resequencer = context.actorOf(Resequencer.props(fromSequenceNr, replayCallback, reachedSeqNrPromise, replayDispatcherId))
 
     val partitions = hBasePersistenceSettings.partitionCount
 
@@ -171,18 +171,22 @@ import scala.collection.JavaConverters._
  *       but it introduces out-of-sequence order scanning (a scan will read 000-a-05 before 001-a-01), which is wy the [[Resequencer]] is needed.
  *
  * @param replayCallback the callback which we want to call with sequenceNr ascending-order messages
+ * @param sequenceStartsAt since we support partial replays (from 4 to 100), the resequencer must know when to start replaying
  */
-private[hbase] class Resequencer(replayCallback: PersistentRepr => Unit, reachedSeqNr: Promise[Long]) extends Actor with ActorLogging {
+private[hbase] class Resequencer(sequenceStartsAt: Long, replayCallback: PersistentRepr => Unit, reachedSeqNr: Promise[Long]) extends Actor with ActorLogging {
 
   private var allSubmitted = false
 
   private val delayed = mutable.Map.empty[Long, PersistentRepr]
-  private var delivered = 0L
+  private var delivered = sequenceStartsAt - 1
 
   import akka.persistence.hbase.journal.Resequencer._
 
   def receive = {
-    case d: PersistentRepr ⇒ resequence(d)
+    case p: PersistentRepr ⇒
+      log.info("Resequencing {} from {}; Delivered until {} already", p.payload, p.sequenceNr, delivered)
+      resequence(p)
+
     case AllPersistentsSubmitted =>
       if (delayed.isEmpty) completeResequencing()
       else allSubmitted = true
@@ -193,6 +197,7 @@ private[hbase] class Resequencer(replayCallback: PersistentRepr => Unit, reached
 
     if (p.sequenceNr == delivered + 1) {
       delivered = p.sequenceNr
+      log.debug("Applying {} @ {}", p.payload, p.sequenceNr)
       replayCallback(p)
 
       if (allSubmitted && delayed.isEmpty)
@@ -213,8 +218,8 @@ private[hbase] class Resequencer(replayCallback: PersistentRepr => Unit, reached
 }
 
 private[hbase] object Resequencer {
-  def props(replayCallback: PersistentRepr => Unit, reachedSeqNr: Promise[Long], dispatcherId: String) =
-    Props(classOf[Resequencer], replayCallback, reachedSeqNr).withDispatcher(dispatcherId) // todo stop it at some point
+  def props(sequenceStartsAt: Long, replayCallback: PersistentRepr => Unit, reachedSeqNr: Promise[Long], dispatcherId: String) =
+    Props(classOf[Resequencer], sequenceStartsAt, replayCallback, reachedSeqNr).withDispatcher(dispatcherId) // todo stop it at some point
 
   case object AllPersistentsSubmitted
 }
