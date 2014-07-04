@@ -9,6 +9,7 @@ import com.google.common.base.Stopwatch
 import org.apache.hadoop.hbase.client.{HTable, Scan}
 import org.apache.hadoop.hbase.filter.CompareFilter.CompareOp
 import org.apache.hadoop.hbase.filter._
+import org.apache.hadoop.hbase.util.Bytes
 
 import scala.collection.immutable
 import scala.concurrent._
@@ -52,7 +53,8 @@ class HBaseAsyncWriteJournal extends Actor with ActorLogging
 
     val futures = persistentBatch map { p =>
       import p._
-      
+
+//      log.debug("Putting into: {}" , RowKey(selectPartition(sequenceNr), persistenceId, sequenceNr).toKeyString)
       executePut(
         RowKey(selectPartition(sequenceNr), persistenceId, sequenceNr).toBytes,
         Array(PersistenceId,          SequenceNr,          Marker,                  Message),
@@ -192,6 +194,7 @@ private[hbase] class Operator(finish: Promise[Unit], op: Array[Byte] => Future[U
 
   def receive = {
     case key: Array[Byte] =>
+      log.debug("Scheduling op on: {}", Bytes.toString(key))
       totalOps += 1
       op(key) foreach { _ => self ! OpApplied(key) }
 

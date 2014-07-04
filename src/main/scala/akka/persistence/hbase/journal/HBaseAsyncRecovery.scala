@@ -190,6 +190,7 @@ private[hbase] class Resequencer(replayCallback: PersistentRepr => Unit, reached
 
   @scala.annotation.tailrec
   private def resequence(p: PersistentRepr) {
+
     if (p.sequenceNr == delivered + 1) {
       delivered = p.sequenceNr
       replayCallback(p)

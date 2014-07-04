@@ -59,15 +59,11 @@ object RowKey {
     lastInPartition(persistenceId, selectPartition(journalConfig.partitionCount - 1), Long.MaxValue) // todo can be optimised a little, use toSequenceNr + bump it (because scan is exclusive)
 
   /** Used to avoid writing all data to the same region - see "hot region" problem */
-  def selectPartition(sequenceNr: Long)(implicit journalConfig: PluginPersistenceSettings): Long = {
-    if (sequenceNr == journalConfig.partitionCount) {
-      println("sequenceNr = " + sequenceNr + ", journalConfig.partitionCound = " +journalConfig.partitionCount + " => " + journalConfig.partitionCount)
+  def selectPartition(sequenceNr: Long)(implicit journalConfig: PluginPersistenceSettings): Long =
+    if (sequenceNr % journalConfig.partitionCount == 0)
       journalConfig.partitionCount
-    } else {
-      println("sequenceNr = " + sequenceNr + ", journalConfig.partitionCound = " +journalConfig.partitionCount + " => " + (sequenceNr % journalConfig.partitionCount))
+    else
       sequenceNr % journalConfig.partitionCount
-    }
-  }
 
   /** INTERNAL API */
   @tailrec private[hbase] def lastSeqNrInPartition(p: Long, i: Long = Long.MaxValue): Long = if (i % p == 0) i else lastSeqNrInPartition(p, i - 1)
