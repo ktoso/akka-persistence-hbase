@@ -56,6 +56,10 @@ trait HBaseAsyncRecovery extends AsyncRecovery {
         val stopScanKey = RowKey.lastInPartition(persistenceId, part, toSequenceNr) // 021-ID-9223372036854775800
         val persistenceIdRowRegex = RowKey.patternForProcessor(persistenceId) //  .*-ID-.*
 
+        // we can avoid canning some partitions - guaranteed to be empty for smaller than the partition number seqNrs
+        if (part > toSequenceNr)
+          return 0
+
         log.info("Scanning {} partition for replay, from {} to {}", part, startScanKey.toKeyString, stopScanKey.toKeyString)
 
         val scan = preparePartitionScan(startScanKey, stopScanKey, persistenceIdRowRegex, onlyRowKeys = false)
@@ -77,7 +81,6 @@ trait HBaseAsyncRecovery extends AsyncRecovery {
             // Note: In case you wonder why we can't break the loop with a simple counter here once we loop through `max` elements:
             // Since this is multiple scans, on multiple partitions, they are not ordered, yet we must deliver ordered messages
             // to the receiver. Only the resequencer knows how many are really "delivered"
-
 
             val markerCell = res.getColumnLatestCell(FamilyBytes, Marker)
             val messageCell = res.getColumnLatestCell(FamilyBytes, Message)
