@@ -37,94 +37,101 @@ import scala.collection.JavaConverters._
   // async recovery plugin impl
 
   override def asyncReplayMessages(persistenceId: String, fromSequenceNr: Long, toSequenceNr: Long, max: Long)
-                                  (replayCallback: PersistentRepr => Unit): Future[Unit] = {
-    log.debug("Async replay for persistenceId [{}], from sequenceNr: [{}], to sequenceNr: [{}]{}",
-      persistenceId, fromSequenceNr, toSequenceNr, if (max != Long.MaxValue) s", limited to: $max messages" else "")
+                                  (replayCallback: PersistentRepr => Unit): Future[Unit] = max match {
+    case 0 =>
+      log.debug("Skipping async replay for persistenceId [{}], from sequenceNr: [{}], to sequenceNr: [{}], since max messages count to replay is 0",
+        persistenceId, fromSequenceNr, toSequenceNr)
 
-    val reachedSeqNrPromise = Promise[Long]()
-    val loopedMaxFlag = new AtomicBoolean(false) // the resequencer may let us know that it looped `max` messages, and we can abort further scanning
-    val resequencer = context.actorOf(Resequencer.props(fromSequenceNr, max, replayCallback, loopedMaxFlag, reachedSeqNrPromise, replayDispatcherId))
+      Future.successful() // no need to do a replay anything
 
-    val partitions = hBasePersistenceSettings.partitionCount
+    case _ =>
+      log.debug("Async replay for persistenceId [{}], from sequenceNr: [{}], to sequenceNr: [{}]{}",
+        persistenceId, fromSequenceNr, toSequenceNr, if (max != Long.MaxValue) s", limited to: $max messages" else "")
 
-    def scanPartition(part: Long, resequencer: ActorRef): Long = {
-      val startScanKey = RowKey.firstInPartition(persistenceId, part, fromSequenceNr) // 021-ID-0000000000000000021
-      val stopScanKey = RowKey.lastInPartition(persistenceId, part, toSequenceNr)     // 021-ID-9223372036854775800
-      val persistenceIdRowRegex = RowKey.patternForProcessor(persistenceId)           //  .*-ID-.*
+      val reachedSeqNrPromise = Promise[Long]()
+      val loopedMaxFlag = new AtomicBoolean(false) // the resequencer may let us know that it looped `max` messages, and we can abort further scanning
+      val resequencer = context.actorOf(Resequencer.props(fromSequenceNr, max, replayCallback, loopedMaxFlag, reachedSeqNrPromise, replayDispatcherId))
 
-      log.info("Scanning {} partition, from {} to {}", part, startScanKey.toKeyString, stopScanKey.toKeyString)
+      val partitions = hBasePersistenceSettings.partitionCount
 
-      val scan = new Scan
-      scan.setStartRow(startScanKey.toBytes) // inclusive
-      scan.setStopRow(stopScanKey.toBytes) // exclusive
-      scan.setBatch(hBasePersistenceSettings.scanBatchSize)
+      def scanPartition(part: Long, resequencer: ActorRef): Long = {
+        val startScanKey = RowKey.firstInPartition(persistenceId, part, fromSequenceNr) // 021-ID-0000000000000000021
+        val stopScanKey = RowKey.lastInPartition(persistenceId, part, toSequenceNr) // 021-ID-9223372036854775800
+        val persistenceIdRowRegex = RowKey.patternForProcessor(persistenceId) //  .*-ID-.*
 
-      scan.addColumn(FamilyBytes, Marker)
-      scan.addColumn(FamilyBytes, Message)
+        log.info("Scanning {} partition, from {} to {}", part, startScanKey.toKeyString, stopScanKey.toKeyString)
 
-      scan.setFilter(new RowFilter(CompareOp.EQUAL, new RegexStringComparator(persistenceIdRowRegex)))
+        val scan = new Scan
+        scan.setStartRow(startScanKey.toBytes) // inclusive
+        scan.setStopRow(stopScanKey.toBytes) // exclusive
+        scan.setBatch(hBasePersistenceSettings.scanBatchSize)
 
-      val scanner = hTable.getScanner(scan)
-      var resequencedMessages: Long = 0L
-      try {
-        var res = scanner.next()
-        while (res != null) {
-          // Note: In case you wonder why we can't break the loop with a simple counter here once we loop through `max` elements:
-          // Since this is multiple scans, on multiple partitions, they are not ordered, yet we must deliver ordered messages
-          // to the receiver. Only the resequencer knows how many are really "delivered"
+        scan.addColumn(FamilyBytes, Marker)
+        scan.addColumn(FamilyBytes, Message)
+
+        scan.setFilter(new RowFilter(CompareOp.EQUAL, new RegexStringComparator(persistenceIdRowRegex)))
+
+        val scanner = hTable.getScanner(scan)
+        var resequencedMessages: Long = 0L
+        try {
+          var res = scanner.next()
+          while (res != null) {
+            // Note: In case you wonder why we can't break the loop with a simple counter here once we loop through `max` elements:
+            // Since this is multiple scans, on multiple partitions, they are not ordered, yet we must deliver ordered messages
+            // to the receiver. Only the resequencer knows how many are really "delivered"
 
 
-          val markerCell = res.getColumnLatestCell(FamilyBytes, Marker)
-          val messageCell = res.getColumnLatestCell(FamilyBytes, Message)
+            val markerCell = res.getColumnLatestCell(FamilyBytes, Marker)
+            val messageCell = res.getColumnLatestCell(FamilyBytes, Message)
 
-          if ((markerCell ne null) && (messageCell ne null)) {
-            val marker = Bytes.toString(CellUtil.cloneValue(markerCell))
+            if ((markerCell ne null) && (messageCell ne null)) {
+              val marker = Bytes.toString(CellUtil.cloneValue(markerCell))
 
-            marker match {
-              case "A" =>
-                val persistentRepr = persistentFromBytes(CellUtil.cloneValue(messageCell))
+              marker match {
+                case "A" =>
+                  val persistentRepr = persistentFromBytes(CellUtil.cloneValue(messageCell))
 
-                val seqNr = persistentRepr.sequenceNr
-                if (fromSequenceNr <= seqNr && seqNr <= toSequenceNr) {
-                  resequencer ! persistentRepr
-                  resequencedMessages += 1
-                }
+                  val seqNr = persistentRepr.sequenceNr
+                  if (fromSequenceNr <= seqNr && seqNr <= toSequenceNr) {
+                    resequencer ! persistentRepr
+                    resequencedMessages += 1
+                  }
 
-              case "S" =>
+                case "S" =>
                 // thanks to treating Snapshot rows as deleted entries, we won't suddenly apply a Snapshot() where the
                 // our Processor expects a normal message. This is implemented for the HBase backed snapshot storage,
                 // if you use the HDFS storage there won't be any snapshot entries in here.
                 // As for message deletes: if we delete msgs up to seqNr 4, and snapshot was at 3, we want to delete it anyway.
                 // treat as deleted, ignore...
 
-              case "D" =>
+                case "D" =>
                 // marked as deleted, ignore...
 
-              case _ =>
-                // channel confirmation
-                val persistentRepr = persistentFromBytes(CellUtil.cloneValue(messageCell))
+                case _ =>
+                  // channel confirmation
+                  val persistentRepr = persistentFromBytes(CellUtil.cloneValue(messageCell))
 
-                val channelId = RowTypeMarkers.extractSeqNrFromConfirmedMarker(marker)
-                replayCallback(persistentRepr.update(confirms = channelId +: persistentRepr.confirms))
+                  val channelId = RowTypeMarkers.extractSeqNrFromConfirmedMarker(marker)
+                  replayCallback(persistentRepr.update(confirms = channelId +: persistentRepr.confirms))
+              }
             }
+            res = scanner.next()
           }
-          res = scanner.next()
+          resequencedMessages
+        } finally {
+          log.debug("Done scheduling replays in partition {} (scheduled: {})", part, resequencedMessages)
+          scanner.close()
+
+          resequencedMessages
         }
-        resequencedMessages
-      } finally {
-        log.debug("Done scheduling replays in partition {} (scheduled: {})", part, resequencedMessages)
-        scanner.close()
-
-        resequencedMessages
       }
-    }
 
-    val partitionScans = (1 to partitions).map(i => Future { scanPartition(i, resequencer) })
-    Future.sequence(partitionScans) onComplete { _ => resequencer ! AllPersistentsSubmitted }
+      val partitionScans = (1 to partitions).map(i => Future { scanPartition(i, resequencer) })
+      Future.sequence(partitionScans) onComplete { _ => resequencer ! AllPersistentsSubmitted}
 
-    reachedSeqNrPromise.future map { case _ =>
-      log.info("Completed recovery scanning for persistenceId {}", persistenceId)
-    }
+      reachedSeqNrPromise.future map { case _ =>
+        log.info("Completed recovery scanning for persistenceId {}", persistenceId)
+      }
   }
 
   // todo make this multiple scans, on each partition instead of one big scan
