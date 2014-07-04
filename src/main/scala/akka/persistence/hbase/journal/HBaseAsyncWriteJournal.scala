@@ -9,7 +9,6 @@ import com.google.common.base.Stopwatch
 import org.apache.hadoop.hbase.client.{HTable, Scan}
 import org.apache.hadoop.hbase.filter.CompareFilter.CompareOp
 import org.apache.hadoop.hbase.filter._
-import org.apache.hadoop.hbase.util.Bytes
 
 import scala.collection.immutable
 import scala.concurrent._
@@ -194,7 +193,7 @@ private[hbase] class Operator(finish: Promise[Unit], op: Array[Byte] => Future[U
 
   def receive = {
     case key: Array[Byte] =>
-      log.debug("Scheduling op on: {}", Bytes.toString(key))
+//      log.debug("Scheduling op on: {}", Bytes.toString(key))
       totalOps += 1
       op(key) foreach { _ => self ! OpApplied(key) }
 
@@ -206,7 +205,7 @@ private[hbase] class Operator(finish: Promise[Unit], op: Array[Byte] => Future[U
       processedOps += 1
 
       if (allOpsSubmitted && (processedOps == totalOps)) {
-        log.debug("Finished processing all {} ops.", totalOps)
+        log.debug("Finished processing all {} ops, shutting down operator.", totalOps)
         finish.success(())
         context stop self
       }

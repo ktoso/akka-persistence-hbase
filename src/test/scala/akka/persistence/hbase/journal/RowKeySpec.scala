@@ -51,7 +51,7 @@ class RowKeySpec extends TestKit(ActorSystem("test")) with FlatSpecLike
 
     val keys = rowKeys.map(_.toKeyString)
 
-    rowKeys foreach { k => info("key: " + k.toKeyString) }
+//    rowKeys foreach { k => info("key: " + k.toKeyString) }
     keys should contain ("001-x-09223372036854775807")
     keys should contain ("002-x-09223372036854775806")
     keys should contain ("050-x-09223372036854775800")
@@ -66,7 +66,7 @@ class RowKeySpec extends TestKit(ActorSystem("test")) with FlatSpecLike
 
     val keys = rowKeys.map(_.toKeyString)
 
-    rowKeys foreach { k => info("key: " + k.toKeyString) }
+//    rowKeys foreach { k => info("key: " + k.toKeyString) }
     keys should contain ("001-x-00000000000000000007")
     keys should contain ("002-x-00000000000000000007")
     keys should contain ("050-x-00000000000000000007")

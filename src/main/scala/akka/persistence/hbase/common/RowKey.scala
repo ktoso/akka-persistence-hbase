@@ -52,11 +52,11 @@ object RowKey {
 
   /** First key possible, similar to: `000-id-000000000000000000000` */
   def firstForPersistenceId(persistenceId: String)(implicit journalConfig: PluginPersistenceSettings) =
-    RowKey(selectPartition(0), persistenceId, 0)
+    RowKey(0, persistenceId, 0)
 
   /** Last key possible, similar to: `999-id-Long.MaxValue` */
   def lastForPersistenceId(persistenceId: String, toSequenceNr: Long = Long.MaxValue)(implicit journalConfig: PluginPersistenceSettings) =
-    lastInPartition(persistenceId, selectPartition(journalConfig.partitionCount - 1), Long.MaxValue) // todo can be optimised a little, use toSequenceNr + bump it (because scan is exclusive)
+    lastInPartition(persistenceId, selectPartition(journalConfig.partitionCount), toSequenceNr)
 
   /** Used to avoid writing all data to the same region - see "hot region" problem */
   def selectPartition(sequenceNr: Long)(implicit journalConfig: PluginPersistenceSettings): Long =
