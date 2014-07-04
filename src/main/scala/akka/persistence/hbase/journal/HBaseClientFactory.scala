@@ -28,6 +28,7 @@ object HBaseClientFactory {
   }
 
   def reset() {
+    Option(client.get).map(_.shutdown())
     client set null
   }
 

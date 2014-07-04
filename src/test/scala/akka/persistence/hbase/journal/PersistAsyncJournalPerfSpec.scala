@@ -3,18 +3,18 @@ package akka.persistence.hbase.journal
 import java.util.Date
 import java.util.concurrent.TimeUnit
 
-import akka.actor.{ActorLogging, ActorRef, ActorSystem, Props}
+import akka.actor._
 import akka.persistence._
 import akka.persistence.hbase.common.TestingEventProtocol.FinishedDeletes
 import akka.testkit.{ImplicitSender, TestKit, TestProbe}
 import com.google.common.base.Stopwatch
 import org.apache.hadoop.hbase.client.{Scan, HTable}
-import org.scalatest.{BeforeAndAfterAll, FlatSpecLike, Matchers}
+import org.scalatest.{BeforeAndAfter, BeforeAndAfterAll, FlatSpecLike, Matchers}
 
 import scala.collection.JavaConversions
 import scala.concurrent.duration._
 
-object PersistAsyncPerfSpec {
+object PersistAsyncJournalPerfSpec {
 
   class Writer(untilSeqNr: Long, override val persistenceId: String) extends PersistentActor
     with ActorLogging {
@@ -41,6 +41,9 @@ object PersistAsyncPerfSpec {
     }
 
     override def receiveRecover: Receive = {
+      case r: RecoveryCompleted =>
+        context.system.eventStream.publish(r)
+
       case m: AnyRef =>
         log.info("Recovered: {}", m)
         handlePersisted(m)
@@ -48,24 +51,20 @@ object PersistAsyncPerfSpec {
 
     def handlePersisted(p: AnyRef): Unit = {
       if (!recoveryRunning) {
-//        log.debug(s"persisted: {} @ {}", p, lastSequenceNr)
+        log.debug(s"persisted: {} @ {}", p, lastSequenceNr)
         sender() ! s"p-$p"
       }
 
-      p match {
-        case _: String => lastPersisted = p
-        case RecoveryCompleted => context.system.eventStream.publish(p)
-      }
+      lastPersisted = p
     }
   }
 
 }
 
-//@DoNotDiscover
-class PersistAsyncPerfSpec extends TestKit(ActorSystem("test")) with FlatSpecLike
-  with ImplicitSender with Matchers with BeforeAndAfterAll {
+class PersistAsyncJournalPerfSpec extends TestKit(ActorSystem("test")) with FlatSpecLike
+  with ImplicitSender with Matchers with BeforeAndAfterAll with BeforeAndAfter {
 
-  import akka.persistence.hbase.journal.PersistAsyncPerfSpec._
+  import akka.persistence.hbase.journal.PersistAsyncJournalPerfSpec._
 
   lazy val config = system.settings.config
 
@@ -77,7 +76,7 @@ class PersistAsyncPerfSpec extends TestKit(ActorSystem("test")) with FlatSpecLik
 
   val messages = (1 to messagesNr) map { i => s"hello-$i-(${new Date})" }
   
-  var actor = createActor(messagesNr, "w-1")
+  lazy val actor: ActorRef = createActor(messagesNr, "w-1")
 
   override def beforeAll() {
     HBaseJournalInit.createTable(config)
@@ -85,19 +84,21 @@ class PersistAsyncPerfSpec extends TestKit(ActorSystem("test")) with FlatSpecLik
   }
   
   override def afterAll() {
-    system.shutdown()
-    system.awaitTermination(1.minute)
     super.afterAll()
+    shutdown(system)
+    HBaseClientFactory.reset()
+  }
+
+  before {
+    createActor(3, "warm-1") ! PoisonPill
   }
 
   it should s"write $messagesNr messages" in {
     val stopwatch = (new Stopwatch).start()
     
-    messages foreach { m =>
-      actor ! m
-    }
+    messages foreach { m => actor ! m }
 
-    messagesNr.times { n => expectMsgType[String] should startWith (s"p-hello-$n") }
+    messagesNr.times { n => expectMsgType[String](15.seconds) should startWith (s"p-hello-$n") }
     stopwatch.stop()
 
     info(s"Sending/persisting $messagesNr messages took: $stopwatch time")
@@ -114,7 +115,7 @@ class PersistAsyncPerfSpec extends TestKit(ActorSystem("test")) with FlatSpecLik
 
     p.expectMsgType[RecoveryCompleted](30.seconds)
 
-    val last = expectMsgType[String]
+    val last = expectMsgType[String](15.seconds)
     last should startWith ("hello-")
   }
 
@@ -124,7 +125,7 @@ class PersistAsyncPerfSpec extends TestKit(ActorSystem("test")) with FlatSpecLik
 
     actor ! "delete"
 
-    p.expectMsgType[FinishedDeletes](max = 1.minute)
+    p.expectMsgType[FinishedDeletes](max = 30.seconds)
 
     countMessages() should equal (0)
   }

@@ -32,7 +32,7 @@ class HdfsSnapshotter(val system: ActorSystem, settings: PluginPersistenceSettin
   private var saving = immutable.Set.empty[SnapshotMetadata]
 
   def loadAsync(persistenceId: String, criteria: SnapshotSelectionCriteria): Future[Option[SelectedSnapshot]] = {
-    log.info("[HDFS] Loading async, for persistenceId {}, criteria: {}", persistenceId, criteria)
+    log.debug("[HDFS] Loading async, for persistenceId {}, criteria: {}", persistenceId, criteria)
     val snapshotMetas = listSnapshots(settings.snapshotHdfsDir, persistenceId)
 
     @tailrec def deserializeOrTryOlder(metas: List[HdfsSnapshotDescriptor]): Option[SelectedSnapshot] = metas match {

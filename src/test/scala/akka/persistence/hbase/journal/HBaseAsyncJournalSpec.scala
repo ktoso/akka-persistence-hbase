@@ -4,7 +4,6 @@ import akka.actor.{ActorLogging, ActorRef, ActorSystem, Props}
 import akka.persistence._
 import akka.persistence.hbase.common.TestingEventProtocol.FinishedDeletes
 import akka.testkit.{ImplicitSender, TestKit, TestProbe}
-import org.apache.hadoop.hbase.client.HBaseAdmin
 import org.scalatest._
 
 import scala.concurrent.duration._
@@ -163,11 +162,8 @@ with Matchers with BeforeAndAfterAll {
   override protected def afterAll() {
     val tableName = config.getString("hbase-journal.table")
 
-    val admin = new HBaseAdmin(HBaseJournalInit.getHBaseConfig(config))
-    admin.disableTable(tableName)
-    admin.deleteTable(tableName)
-    admin.close()
-
+    HBaseJournalInit.disableTable(config)
+    HBaseJournalInit.deleteTable(config)
     HBaseClientFactory.reset()
 
     system.shutdown()

@@ -134,7 +134,7 @@ trait HBaseAsyncRecovery extends AsyncRecovery {
       }
 
       reachedSeqNrPromise.future map { case _ =>
-        log.info("Completed recovery scanning for persistenceId {}", persistenceId)
+        log.debug("Completed recovery scanning for persistenceId {}", persistenceId)
       }
   }
 
@@ -165,7 +165,7 @@ trait HBaseAsyncRecovery extends AsyncRecovery {
         }
         highestSeqNr
       } finally {
-        if (highestSeqNr != 0) log.debug("Done scheduling replays in partition {} (highest seqNr: {})", part, highestSeqNr)
+        log.debug("Done scheduling replays in partition {} (highest seqNr: {})", part, highestSeqNr)
         scanner.close()
       }
     }
