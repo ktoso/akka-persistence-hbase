@@ -73,6 +73,15 @@ import scala.collection.JavaConverters._
 
         val scanner = hTable.getScanner(scan)
         var lowestSeqNr: Long = 0L
+
+        def resequenceMsg(persistentRepr: PersistentRepr) {
+          val seqNr = persistentRepr.sequenceNr
+          if (fromSequenceNr <= seqNr && seqNr <= toSequenceNr) {
+            resequencer ! persistentRepr
+            lowestSeqNr = seqNr
+          }
+        }
+
         try {
           var res = scanner.next()
           while (res != null) {
@@ -90,22 +99,19 @@ import scala.collection.JavaConverters._
               marker match {
                 case "A" =>
                   val persistentRepr = persistentFromBytes(CellUtil.cloneValue(messageCell))
-
-                  val seqNr = persistentRepr.sequenceNr
-                  if (fromSequenceNr <= seqNr && seqNr <= toSequenceNr) {
-                    resequencer ! persistentRepr
-                    lowestSeqNr = seqNr
-                  }
+                  resequenceMsg(persistentRepr)
 
                 case "S" =>
                   // thanks to treating Snapshot rows as deleted entries, we won't suddenly apply a Snapshot() where the
                   // our Processor expects a normal message. This is implemented for the HBase backed snapshot storage,
                   // if you use the HDFS storage there won't be any snapshot entries in here.
                   // As for message deletes: if we delete msgs up to seqNr 4, and snapshot was at 3, we want to delete it anyway.
-                  // treat as deleted, ignore...
+
 
                 case "D" =>
-                  // marked as deleted, ignore...
+                  // mark as deleted, journal may choose to replay it
+                  val persistentRepr = persistentFromBytes(CellUtil.cloneValue(messageCell))
+                  resequenceMsg(persistentRepr.update(deleted = true))
 
                 case _ =>
                   // channel confirmation
