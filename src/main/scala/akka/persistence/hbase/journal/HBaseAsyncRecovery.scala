@@ -1,5 +1,6 @@
 package akka.persistence.hbase.journal
 
+import java.util.concurrent.atomic.AtomicBoolean
 import java.{util => ju}
 
 import akka.actor.{Actor, ActorLogging, ActorRef, Props}
@@ -37,10 +38,12 @@ import scala.collection.JavaConverters._
 
   override def asyncReplayMessages(persistenceId: String, fromSequenceNr: Long, toSequenceNr: Long, max: Long)
                                   (replayCallback: PersistentRepr => Unit): Future[Unit] = {
-    log.debug(s"Async replay for persistenceId [$persistenceId], from sequenceNr: [$fromSequenceNr], to sequenceNr: [$toSequenceNr]")
+    log.debug("Async replay for persistenceId [{}], from sequenceNr: [{}], to sequenceNr: [{}]{}",
+      persistenceId, fromSequenceNr, toSequenceNr, if (max != Long.MaxValue) s", limited to: $max messages" else "")
 
     val reachedSeqNrPromise = Promise[Long]()
-    val resequencer = context.actorOf(Resequencer.props(fromSequenceNr, replayCallback, reachedSeqNrPromise, replayDispatcherId))
+    val loopedMaxFlag = new AtomicBoolean(false) // the resequencer may let us know that it looped `max` messages, and we can abort further scanning
+    val resequencer = context.actorOf(Resequencer.props(fromSequenceNr, max, replayCallback, loopedMaxFlag, reachedSeqNrPromise, replayDispatcherId))
 
     val partitions = hBasePersistenceSettings.partitionCount
 
@@ -62,10 +65,14 @@ import scala.collection.JavaConverters._
       scan.setFilter(new RowFilter(CompareOp.EQUAL, new RegexStringComparator(persistenceIdRowRegex)))
 
       val scanner = hTable.getScanner(scan)
-      var scheduled = 0L
+      var resequencedMessages: Long = 0L
       try {
         var res = scanner.next()
         while (res != null) {
+          // Note: In case you wonder why we can't break the loop with a simple counter here once we loop through `max` elements:
+          // Since this is multiple scans, on multiple partitions, they are not ordered, yet we must deliver ordered messages
+          // to the receiver. Only the resequencer knows how many are really "delivered"
+
 
           val markerCell = res.getColumnLatestCell(FamilyBytes, Marker)
           val messageCell = res.getColumnLatestCell(FamilyBytes, Message)
@@ -80,7 +87,7 @@ import scala.collection.JavaConverters._
                 val seqNr = persistentRepr.sequenceNr
                 if (fromSequenceNr <= seqNr && seqNr <= toSequenceNr) {
                   resequencer ! persistentRepr
-                  scheduled += 1
+                  resequencedMessages += 1
                 }
 
               case "S" =>
@@ -103,12 +110,12 @@ import scala.collection.JavaConverters._
           }
           res = scanner.next()
         }
-        scheduled
+        resequencedMessages
       } finally {
-        log.debug("Done scheduling replays in partition {} (scheduled: {})", part, scheduled)
+        log.debug("Done scheduling replays in partition {} (scheduled: {})", part, resequencedMessages)
         scanner.close()
 
-        scheduled
+        resequencedMessages
       }
     }
 
@@ -171,20 +178,29 @@ import scala.collection.JavaConverters._
  *       but it introduces out-of-sequence order scanning (a scan will read 000-a-05 before 001-a-01), which is wy the [[Resequencer]] is needed.
  *
  * @param replayCallback the callback which we want to call with sequenceNr ascending-order messages
+ * @param maxMsgsToSequence max number of messages to be resequenced, usualy Long.MaxValue, but can be used to perform partial replays
+ * @param loopedMaxFlag switched to `true` once `maxMsgsToSequence` is reached, with the goal of shortcircutting scanning the HTable
  * @param sequenceStartsAt since we support partial replays (from 4 to 100), the resequencer must know when to start replaying
  */
-private[hbase] class Resequencer(sequenceStartsAt: Long, replayCallback: PersistentRepr => Unit, reachedSeqNr: Promise[Long]) extends Actor with ActorLogging {
+private[hbase] class Resequencer(
+    sequenceStartsAt: Long,
+    maxMsgsToSequence: Long,
+    replayCallback: PersistentRepr => Unit,
+    loopedMaxFlag: AtomicBoolean,
+    reachedSeqNr: Promise[Long]
+  ) extends Actor with ActorLogging {
 
   private var allSubmitted = false
 
   private val delayed = mutable.Map.empty[Long, PersistentRepr]
-  private var delivered = sequenceStartsAt - 1
+  private var deliveredSeqNr = sequenceStartsAt - 1
+  private def deliveredMsgs = deliveredSeqNr - sequenceStartsAt + 1
 
   import akka.persistence.hbase.journal.Resequencer._
 
   def receive = {
     case p: PersistentRepr ⇒
-      log.info("Resequencing {} from {}; Delivered until {} already", p.payload, p.sequenceNr, delivered)
+      log.info("Resequencing {} from {}; Delivered until {} already", p.payload, p.sequenceNr, deliveredSeqNr)
       resequence(p)
 
     case AllPersistentsSubmitted =>
@@ -195,31 +211,38 @@ private[hbase] class Resequencer(sequenceStartsAt: Long, replayCallback: Persist
   @scala.annotation.tailrec
   private def resequence(p: PersistentRepr) {
 
-    if (p.sequenceNr == delivered + 1) {
-      delivered = p.sequenceNr
+    if (p.sequenceNr == deliveredSeqNr + 1) {
+      deliveredSeqNr = p.sequenceNr
       log.debug("Applying {} @ {}", p.payload, p.sequenceNr)
       replayCallback(p)
 
-      if (allSubmitted && delayed.isEmpty)
+      if (deliveredMsgs == maxMsgsToSequence) {
+        delayed.clear()
+        loopedMaxFlag set true
+
         completeResequencing()
+      } else if (allSubmitted && delayed.isEmpty) {
+        completeResequencing()
+      }
     } else {
       delayed += (p.sequenceNr -> p)
     }
 
-    val ro = delayed.remove(delivered + 1)
+    val ro = delayed.remove(deliveredSeqNr + 1)
     if (ro.isDefined) resequence(ro.get)
   }
 
   private def completeResequencing() {
-    log.debug("All messages have been resequenced and applied (until seqNr: {})!", delivered)
-    reachedSeqNr success delivered
+    log.debug("All messages have been resequenced and applied (until seqNr: {}, nr of messages: {})!", deliveredSeqNr, deliveredMsgs)
+    reachedSeqNr success deliveredSeqNr
     context stop self
   }
 }
 
 private[hbase] object Resequencer {
-  def props(sequenceStartsAt: Long, replayCallback: PersistentRepr => Unit, reachedSeqNr: Promise[Long], dispatcherId: String) =
-    Props(classOf[Resequencer], sequenceStartsAt, replayCallback, reachedSeqNr).withDispatcher(dispatcherId) // todo stop it at some point
+
+  def props(sequenceStartsAt: Long, maxMsgsToSequence: Long, replayCallback: PersistentRepr => Unit, loopedMaxFlag: AtomicBoolean, reachedSeqNr: Promise[Long], dispatcherId: String) =
+    Props(classOf[Resequencer], sequenceStartsAt, maxMsgsToSequence, replayCallback, loopedMaxFlag, reachedSeqNr).withDispatcher(dispatcherId) // todo stop it at some point
 
   case object AllPersistentsSubmitted
 }
