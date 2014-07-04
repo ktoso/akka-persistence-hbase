@@ -5,9 +5,8 @@ import akka.persistence.hbase.journal.PluginPersistenceSettings
 
 import scala.annotation.tailrec
 
-case class RowKey(persistenceId: String, sequenceNr: Long)(implicit val hBasePersistenceSettings: PluginPersistenceSettings) {
+case class RowKey(part: Long, persistenceId: String, sequenceNr: Long)(implicit val hBasePersistenceSettings: PluginPersistenceSettings) {
 
-  def part = RowKey.partition(sequenceNr)
   def toBytes = Bytes.toBytes(toKeyString)
 
   def toKeyString = s"${padded(part, 3)}-$persistenceId-${padded(sequenceNr, 20)}"
@@ -19,36 +18,36 @@ case class RowKey(persistenceId: String, sequenceNr: Long)(implicit val hBasePer
 
 object RowKey {
   /**
-   * Since we're salting (prefixing) the entries with partition numbers,
+   * Since we're salting (prefixing) the entries with selectPartition numbers,
    * we must use this pattern for scanning for "all messages for processorX"
    */
   def patternForProcessor(persistenceId: String)(implicit journalConfig: PluginPersistenceSettings) = s""".*-$persistenceId-.*"""
 
-  def firstInPartition(persistenceId: String, partition: Long)(implicit journalConfig: PluginPersistenceSettings) = {
+  def firstInPartition(persistenceId: String, partition: Long, fromSequenceNr: Long = 0)(implicit journalConfig: PluginPersistenceSettings) = {
     require(partition > 0, "partition must be > 0")
     require(partition <= journalConfig.partitionCount, "partition must be <= partitionCount")
 
-    if (partition == journalConfig.partitionCount)
-      RowKey.apply(persistenceId, partition)
-    else
-      RowKey.apply(persistenceId, partition % journalConfig.partitionCount)
+    val lowerBoundAdjustedSeqNr =
+      if (partition < fromSequenceNr)
+        fromSequenceNr
+      else if (partition == journalConfig.partitionCount)
+        partition
+      else
+        selectPartition(partition)
+
+      RowKey.apply(selectPartition(partition), persistenceId, lowerBoundAdjustedSeqNr)
   }
 
   def lastInPartition(persistenceId: String, targetPartition: Long, toSequenceNr: Long = Long.MaxValue)(implicit journalConfig: PluginPersistenceSettings) = {
     require(targetPartition > 0, s"partition must be > 0, ($targetPartition)")
     require(targetPartition <= journalConfig.partitionCount, s"partition must be <= partitionCount, ($targetPartition <!= ${journalConfig.partitionCount})")
 
-    new RowKey(persistenceId, lastSeqNrInPartition(targetPartition, toSequenceNr)) {
-      override def part = partition(targetPartition)(journalConfig)
-    }
+    new RowKey(selectPartition(targetPartition)(journalConfig), persistenceId, lastSeqNrInPartition(targetPartition, toSequenceNr))
   }
-
-  /** INTERNAL API */
-  @tailrec private[hbase] def lastSeqNrInPartition(p: Long, i: Long): Long = if (i % p == 0) i else lastSeqNrInPartition(p, i - 1)
 
   /** First key possible, similar to: `000-id-000000000000000000000` */
   def firstForPersistenceId(persistenceId: String)(implicit journalConfig: PluginPersistenceSettings) =
-    RowKey(persistenceId, 0)
+    RowKey(selectPartition(0), persistenceId, 0)
 
 //  /**
 //   * Last key prepared for Scan, similar to: `999-id-0000000121212`,
@@ -67,10 +66,14 @@ object RowKey {
 //  }
 
   /** Last key possible, similar to: `999-id-Long.MaxValue` */
-  def lastForPersistenceId(persistenceId: String, toSequenceNr: Long)(implicit journalConfig: PluginPersistenceSettings) =
-    lastInPartition(persistenceId, partition(journalConfig.partitionCount - 1), Long.MaxValue) // todo can be optimised a little, use toSequenceNr + bump it (because scan is exclusive)
+  def lastForPersistenceId(persistenceId: String, toSequenceNr: Long = Long.MaxValue)(implicit journalConfig: PluginPersistenceSettings) =
+    lastInPartition(persistenceId, selectPartition(journalConfig.partitionCount - 1), Long.MaxValue) // todo can be optimised a little, use toSequenceNr + bump it (because scan is exclusive)
 
   /** Used to avoid writing all data to the same region - see "hot region" problem */
-  private def partition(sequenceNr: Long)(implicit journalConfig: PluginPersistenceSettings): Long =
+  def selectPartition(sequenceNr: Long)(implicit journalConfig: PluginPersistenceSettings): Long =
     sequenceNr % journalConfig.partitionCount
+
+  /** INTERNAL API */
+  @tailrec private[hbase] def lastSeqNrInPartition(p: Long, i: Long): Long = if (i % p == 0) i else lastSeqNrInPartition(p, i - 1)
+
 }

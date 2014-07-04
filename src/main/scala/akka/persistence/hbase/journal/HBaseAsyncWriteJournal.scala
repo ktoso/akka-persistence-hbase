@@ -54,7 +54,7 @@ class HBaseAsyncWriteJournal extends Actor with ActorLogging
       import p._
       
       executePut(
-        RowKey(persistenceId, sequenceNr).toBytes,
+        RowKey(selectPartition(sequenceNr), persistenceId, sequenceNr).toBytes,
         Array(PersistenceId,          SequenceNr,          Marker,                  Message),
         Array(toBytes(persistenceId), toBytes(sequenceNr), toBytes(AcceptedMarker), persistentToBytes(p))
       )
@@ -141,7 +141,7 @@ class HBaseAsyncWriteJournal extends Actor with ActorLogging
 
     val deleteFutures = for {
       messageId <- messageIds
-      rowId = RowKey(messageId.persistenceId, messageId.sequenceNr)
+      rowId = RowKey(selectPartition(messageId.sequenceNr), messageId.persistenceId, messageId.sequenceNr)
     } yield doDelete(rowId.toBytes)
 
     flushWrites()
@@ -154,7 +154,7 @@ class HBaseAsyncWriteJournal extends Actor with ActorLogging
       log.debug(s"Confirming async for persistenceId: {}, sequenceNr: {} and channelId: {}", persistenceId, sequenceNr, channelId)
 
       executePut(
-        RowKey(persistenceId, sequenceNr).toBytes,
+        RowKey(sequenceNr, persistenceId, sequenceNr).toBytes,
         Array(Marker),
         Array(confirmedMarkerBytes(channelId))
       )

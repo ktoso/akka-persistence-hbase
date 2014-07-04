@@ -1,20 +1,20 @@
 package akka.persistence.hbase.snapshot
 
+import java.util.{ArrayList => JArrayList}
+
 import akka.actor.ActorSystem
-import akka.persistence.{SelectedSnapshot, SnapshotSelectionCriteria}
-import scala.concurrent.{Promise, Future}
-import org.hbase.async.{KeyValue, HBaseClient}
-import org.apache.hadoop.hbase.util.Bytes._
-import akka.persistence.SnapshotMetadata
-import akka.persistence.hbase.journal._
-import akka.persistence.hbase.common._
-import collection.JavaConverters._
-import java.util. { ArrayList => JArrayList }
-import scala.collection.immutable
-import akka.persistence.serialization.Snapshot
-import akka.serialization.SerializationExtension
-import scala.util.{Failure, Success, Try}
 import akka.persistence.hbase.common.TestingEventProtocol.DeletedSnapshotsFor
+import akka.persistence.hbase.common._
+import akka.persistence.hbase.journal._
+import akka.persistence.serialization.Snapshot
+import akka.persistence.{SelectedSnapshot, SnapshotMetadata, SnapshotSelectionCriteria}
+import org.apache.hadoop.hbase.util.Bytes._
+import org.hbase.async.{HBaseClient, KeyValue}
+
+import scala.collection.JavaConverters._
+import scala.collection.immutable
+import scala.concurrent.{Future, Promise}
+import scala.util.{Failure, Success}
 
 class HBaseSnapshotter(val system: ActorSystem, val hBasePersistenceSettings: PluginPersistenceSettings, val client: HBaseClient)
   extends HadoopSnapshotter
@@ -31,8 +31,8 @@ class HBaseSnapshotter(val system: ActorSystem, val hBasePersistenceSettings: Pl
   /** Snapshots we're in progress of saving */
   private var saving = immutable.Set.empty[SnapshotMetadata]
 
-  import Columns._
-  import RowTypeMarkers._
+  import akka.persistence.hbase.common.Columns._
+  import akka.persistence.hbase.journal.RowTypeMarkers._
 
   def loadAsync(persistenceId: String, criteria: SnapshotSelectionCriteria): Future[Option[SelectedSnapshot]] = {
     log.debug("Loading async for persistenceId: [{}] on criteria: {}", persistenceId, criteria)
@@ -40,7 +40,7 @@ class HBaseSnapshotter(val system: ActorSystem, val hBasePersistenceSettings: Pl
     val SnapshotSelectionCriteria(maxSequenceNr, maxTimestamp) = criteria
 
     val start = RowKey.firstForPersistenceId(persistenceId)
-    val stop = RowKey(persistenceId, maxSequenceNr)
+    val stop = RowKey(selectPartition(maxSequenceNr), persistenceId, maxSequenceNr)
 
     scanner.setStartKey(start.toBytes)
     scanner.setStopKey(stop.toBytes)
@@ -85,7 +85,7 @@ class HBaseSnapshotter(val system: ActorSystem, val hBasePersistenceSettings: Pl
     serialize(Snapshot(snapshot)) match {
       case Success(serializedSnapshot) =>
         executePut(
-          RowKey(meta.persistenceId, meta.sequenceNr).toBytes,
+          RowKey(selectPartition(meta.sequenceNr), meta.persistenceId, meta.sequenceNr).toBytes,
           Array(Marker,              Message),
           Array(SnapshotMarkerBytes, serializedSnapshot)
         )
@@ -103,7 +103,7 @@ class HBaseSnapshotter(val system: ActorSystem, val hBasePersistenceSettings: Pl
   def delete(meta: SnapshotMetadata): Unit = {
     log.debug("Deleting: {}", meta)
     saving -= meta
-    executeDelete(RowKey(meta.persistenceId, meta.sequenceNr).toBytes)
+    executeDelete(RowKey(selectPartition(meta.sequenceNr), meta.persistenceId, meta.sequenceNr).toBytes)
   }
 
   def delete(persistenceId: String, criteria: SnapshotSelectionCriteria): Unit = {
@@ -112,7 +112,7 @@ class HBaseSnapshotter(val system: ActorSystem, val hBasePersistenceSettings: Pl
     val scanner = newScanner()
 
     val start = RowKey.firstForPersistenceId(persistenceId)
-    val stop = RowKey(persistenceId, criteria.maxSequenceNr)
+    val stop = RowKey.lastForPersistenceId(persistenceId, criteria.maxSequenceNr)
 
     scanner.setStartKey(start.toBytes)
     scanner.setStopKey(stop.toBytes)

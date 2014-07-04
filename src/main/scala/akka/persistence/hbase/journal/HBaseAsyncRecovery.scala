@@ -35,7 +35,6 @@ import scala.collection.JavaConverters._
 
   // async recovery plugin impl
 
-  // todo can be improved to to N parallel scans for each "partition" we created, instead of one "big scan"
   override def asyncReplayMessages(persistenceId: String, fromSequenceNr: Long, toSequenceNr: Long, max: Long)
                                   (replayCallback: PersistentRepr => Unit): Future[Unit] = {
     log.debug(s"Async replay for persistenceId [$persistenceId], from sequenceNr: [$fromSequenceNr], to sequenceNr: [$toSequenceNr]")
@@ -46,9 +45,9 @@ import scala.collection.JavaConverters._
     val partitions = hBasePersistenceSettings.partitionCount
 
     def scanPartition(part: Long, resequencer: ActorRef): Long = {
-      val startScanKey = RowKey.firstInPartition(persistenceId, part)             // 021-ID-0000000000000000021
-      val stopScanKey = RowKey.lastInPartition(persistenceId, part, toSequenceNr) // 021-ID-9223372036854775800
-      val persistenceIdRowRegex = RowKey.patternForProcessor(persistenceId)       //  .*-ID-.*
+      val startScanKey = RowKey.firstInPartition(persistenceId, part, fromSequenceNr) // 021-ID-0000000000000000021
+      val stopScanKey = RowKey.lastInPartition(persistenceId, part, toSequenceNr)     // 021-ID-9223372036854775800
+      val persistenceIdRowRegex = RowKey.patternForProcessor(persistenceId)           //  .*-ID-.*
 
       log.info("Scanning {} partition, from {} to {}", part, startScanKey.toKeyString, stopScanKey.toKeyString)
 
@@ -126,7 +125,8 @@ import scala.collection.JavaConverters._
     log.debug(s"Async read for highest sequence number for persistenceId: [$persistenceId] (hint, seek from  nr: [$fromSequenceNr])")
 
     val scanner = newScanner()
-    scanner.setStartKey(RowKey(persistenceId, fromSequenceNr).toBytes)
+    scanner.setStartKey(RowKey(selectPartition(fromSequenceNr), persistenceId, fromSequenceNr).toBytes)
+    scanner.setStartKey(RowKey.lastForPersistenceId(persistenceId).toBytes)
     scanner.setKeyRegexp(RowKey.patternForProcessor(persistenceId))
 
     def handleRows(in: AnyRef): Future[Long] = in match {

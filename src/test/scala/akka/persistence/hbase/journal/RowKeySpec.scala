@@ -26,6 +26,24 @@ class RowKeySpec extends TestKit(ActorSystem("test")) with FlatSpecLike
     rowKeys.map(_.part) should equal ((1 to 49).toList ::: List(0))
   }
 
+  it should "find first key in partition, with lower bound 4" in {
+    val rowKeys = for {
+      p <- 1 to 50
+    } yield RowKey.firstInPartition("x", p, fromSequenceNr = 4)
+
+    val keys = rowKeys.map(_.toKeyString)
+
+//    keys foreach { k => info("key: " + k.toKeyString) }
+    keys should contain ("001-x-00000000000000000004")
+    keys should contain ("002-x-00000000000000000004")
+    keys should contain ("003-x-00000000000000000004")
+    keys should contain ("004-x-00000000000000000004")
+    keys should contain ("005-x-00000000000000000005")
+    keys should contain ("000-x-00000000000000000050")
+
+    rowKeys.map(_.part) should equal ((1 to 49).toList ::: List(0))
+  }
+
   it should "find last key in partition" in {
     val rowKeys = for {
       p <- 1 to 50

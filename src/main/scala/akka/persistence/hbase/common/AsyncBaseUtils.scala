@@ -23,6 +23,9 @@ trait AsyncBaseUtils {
   import akka.persistence.hbase.common.Columns._
   import akka.persistence.hbase.common.DeferredConversions._
 
+  /** Used to avoid writing all data to the same region - see "hot region" problem */
+  def selectPartition(sequenceNr: Long): Long = sequenceNr % hBasePersistenceSettings.partitionCount
+
   protected def isSnapshotRow(columns: Seq[KeyValue]): Boolean =
     ju.Arrays.equals(findColumn(columns, Marker).value, SnapshotMarkerBytes)
 
