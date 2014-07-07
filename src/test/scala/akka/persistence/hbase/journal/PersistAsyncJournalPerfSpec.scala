@@ -45,13 +45,13 @@ object PersistAsyncJournalPerfSpec {
         context.system.eventStream.publish(r)
 
       case m: AnyRef =>
-        log.info("Recovered: {}", m)
+        // log.info("Recovered: {}", m)
         handlePersisted(m)
     }
 
     def handlePersisted(p: AnyRef): Unit = {
       if (!recoveryRunning) {
-        log.debug(s"persisted: {} @ {}", p, lastSequenceNr)
+        // log.debug(s"persisted: {} @ {}", p, lastSequenceNr)
         sender() ! s"p-$p"
       }
 

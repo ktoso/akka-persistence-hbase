@@ -166,11 +166,11 @@ with Matchers with BeforeAndAfterAll {
   override protected def afterAll() {
     super.afterAll()
 
-    HBaseJournalInit.disableTable(config, pluginSettings.table)
-    HBaseJournalInit.deleteTable(config, pluginSettings.table)
-
-    HBaseJournalInit.disableTable(config, pluginSettings.snapshotTable)
-    HBaseJournalInit.deleteTable(config, pluginSettings.snapshotTable)
+//    HBaseJournalInit.disableTable(config, pluginSettings.table)
+//    HBaseJournalInit.deleteTable(config, pluginSettings.table)
+//
+//    HBaseJournalInit.disableTable(config, pluginSettings.snapshotTable)
+//    HBaseJournalInit.deleteTable(config, pluginSettings.snapshotTable)
 
     HBaseClientFactory.reset()
 
