@@ -1,9 +1,9 @@
 HBase plugin for Akka Persistence
 ==================================
 
-A replicated _fully asynchronous_ [Akka Persistence](http://doc.akka.io/docs/akka/snapshot/scala/persistence.html) journal and snapshot store backed by [Apache HBase](http://hbase.apache.org).
+A replicated _asynchronous_ [Akka Persistence](http://doc.akka.io/docs/akka/snapshot/scala/persistence.html) journal and snapshot store backed by [Apache HBase](http://hbase.apache.org).
 
-<a href="https://travis-ci.org/ktoso/akka-persistence-hbase"><img src="https://travis-ci.org/ktoso/akka-persistence-hbase.png" alt="akka-persistence-hbase build status"></a> (because I'm trying to get Hbase / HDFS to become testable on Travis... not there yet).
+<a href="https://travis-ci.org/ktoso/akka-persistence-hbase"><img src="https://travis-ci.org/ktoso/akka-persistence-hbase.png" alt="akka-persistence-hbase build status"></a>
 
 Akka-persistance-hbase also provides a _SnapshotStore_ two implementations, one which stores directly into the messages HBase collection,
 and another one that used HDFS to store larger snapshots. You must select one of the implementations in the configuration.
@@ -22,7 +22,7 @@ Compatibility grid:
 
 | HBase plugin   | Akka Persistence    | 
 | -------------- |:-------------------:| 
-| `0.0.4`        | `2.3.4+`            |
+| `0.4.1`        | `2.3.4+`            |
 
 Configuration
 -------------
