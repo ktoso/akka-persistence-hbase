@@ -46,7 +46,7 @@ object HBaseAsyncJournalSpec {
 }
 
 class HBaseAsyncJournalSpec extends TestKit(ActorSystem("test")) with ImplicitSender with FlatSpecLike
-with Matchers with BeforeAndAfterAll {
+  with Matchers with BeforeAndAfterAll {
 
   import akka.persistence.hbase.journal.HBaseAsyncJournalSpec._
 
@@ -62,6 +62,8 @@ with Matchers with BeforeAndAfterAll {
     super.beforeAll()
     HBaseJournalInit.createTable(config, pluginSettings.table, pluginSettings.family)
     HBaseJournalInit.createTable(config, pluginSettings.snapshotTable, pluginSettings.snapshotFamily)
+
+    Thread.sleep(2000)
   }
 
   it should "write and replay messages" in {
@@ -164,16 +166,16 @@ with Matchers with BeforeAndAfterAll {
     probe.expectMsgType[FinishedDeletes](max = 10.seconds)
 
   override protected def afterAll() {
-    super.afterAll()
+    HBaseJournalInit.disableTable(config, pluginSettings.table)
+    HBaseJournalInit.deleteTable(config, pluginSettings.table)
 
-//    HBaseJournalInit.disableTable(config, pluginSettings.table)
-//    HBaseJournalInit.deleteTable(config, pluginSettings.table)
-//
-//    HBaseJournalInit.disableTable(config, pluginSettings.snapshotTable)
-//    HBaseJournalInit.deleteTable(config, pluginSettings.snapshotTable)
+    HBaseJournalInit.disableTable(config, pluginSettings.snapshotTable)
+    HBaseJournalInit.deleteTable(config, pluginSettings.snapshotTable)
 
     HBaseClientFactory.reset()
 
     shutdown(system)
+
+    super.afterAll()
   }
 }

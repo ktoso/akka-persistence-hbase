@@ -10,7 +10,9 @@ class RowKeySpec extends TestKit(ActorSystem("test")) with FlatSpecLike
 
   behavior of "RowKey"
 
-  implicit val settings = PersistencePluginSettings(system.settings.config)
+  val config = system.settings.config
+
+  implicit val settings = PersistencePluginSettings(config)
 
   it should "find first key in partition" in {
     val rowKeys = for {
@@ -72,6 +74,18 @@ class RowKeySpec extends TestKit(ActorSystem("test")) with FlatSpecLike
     keys should contain ("050-x-00000000000000000007")
 
     rowKeys.map(_.part) should equal ((1 to 50).toList)
+  }
+
+  override def afterAll() {
+    shutdown(system)
+
+    HBaseJournalInit.disableTable(config, settings.table)
+    HBaseJournalInit.deleteTable(config, settings.table)
+
+    HBaseJournalInit.disableTable(config, settings.snapshotTable)
+    HBaseJournalInit.deleteTable(config, settings.snapshotTable)
+
+    super.afterAll()
   }
 
 }

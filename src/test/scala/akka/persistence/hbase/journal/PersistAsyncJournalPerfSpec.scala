@@ -68,7 +68,7 @@ class PersistAsyncJournalPerfSpec extends TestKit(ActorSystem("test")) with Flat
 
   lazy val config = system.settings.config
 
-  lazy val pluginConfig = PersistencePluginSettings(config)
+  lazy val settings = PersistencePluginSettings(config)
 
   behavior of "HBaseJournal"
 
@@ -85,8 +85,15 @@ class PersistAsyncJournalPerfSpec extends TestKit(ActorSystem("test")) with Flat
   
   override def afterAll() {
     super.afterAll()
-    shutdown(system)
+    
+    HBaseJournalInit.disableTable(config, settings.table)
+    HBaseJournalInit.deleteTable(config, settings.table)
+
+    HBaseJournalInit.disableTable(config, settings.snapshotTable)
+    HBaseJournalInit.deleteTable(config, settings.snapshotTable)
+    
     HBaseClientFactory.reset()
+    shutdown(system)
   }
 
   before {
@@ -131,7 +138,7 @@ class PersistAsyncJournalPerfSpec extends TestKit(ActorSystem("test")) with Flat
   }
 
   private def countMessages(): Int = {
-    val hTable = new HTable(pluginConfig.hadoopConfiguration, pluginConfig.table)
+    val hTable = new HTable(settings.hadoopConfiguration, settings.table)
     val scan = new Scan
     val scanner = hTable.getScanner(scan)
     import JavaConversions._

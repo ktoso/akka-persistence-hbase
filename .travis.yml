@@ -4,4 +4,5 @@ scala:
 before_install: ./scripts/ci/before-install.sh
 install:        ./scripts/ci/install.sh
 before_script:  ./scripts/ci/before-script.sh
+script:         ./scripts/ci/test.sh
 after_script:   ./scripts/ci/after-install.sh
