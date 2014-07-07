@@ -23,7 +23,11 @@ class AsyncJournalTCKSpec extends JournalSpec {
 
   override protected def afterAll() {
     HBaseJournalInit.disableTable(config, settings.table)
+    HBaseJournalInit.deleteTable(config, settings.table)
+
     HBaseJournalInit.disableTable(config, settings.snapshotTable)
+    HBaseJournalInit.deleteTable(config, settings.snapshotTable)
+
     HBaseClientFactory.reset()
 
     super.afterAll()
