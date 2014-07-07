@@ -13,7 +13,7 @@ import org.apache.hadoop.conf.Configuration
  * @param scanBatchSize when performing scans, how many items to we want to obtain per one next(N) call
  * @param replayDispatcherId dispatcher for fetching and replaying messages
  */
-case class PluginPersistenceSettings(
+case class PersistencePluginSettings(
   zookeeperQuorum: String,
   table: String,
   family: String,
@@ -22,16 +22,18 @@ case class PluginPersistenceSettings(
   pluginDispatcherId: String,
   replayDispatcherId: String,
   publishTestingEvents: Boolean,
+  snapshotTable: String,
+  snapshotFamily: String,
   snapshotHdfsDir: String,
   hadoopConfiguration: Configuration
 )
 
-object PluginPersistenceSettings {
-  def apply(rootConfig: Config): PluginPersistenceSettings = {
+object PersistencePluginSettings {
+  def apply(rootConfig: Config): PersistencePluginSettings = {
     val journalConfig = rootConfig.getConfig("hbase-journal")
     val snapshotConfig = rootConfig.getConfig("hadoop-snapshot-store")
 
-    PluginPersistenceSettings(
+    PersistencePluginSettings(
       zookeeperQuorum      = journalConfig.getString("hbase.zookeeper.quorum"),
       table                = journalConfig.getString("table"),
       family               = journalConfig.getString("family"),
@@ -40,6 +42,8 @@ object PluginPersistenceSettings {
       pluginDispatcherId   = journalConfig.getString("plugin-dispatcher"),
       replayDispatcherId   = journalConfig.getString("replay-dispatcher"),
       publishTestingEvents = journalConfig.getBoolean("publish-testing-events"),
+      snapshotTable        = snapshotConfig.getString("hbase.table"),
+      snapshotFamily       = snapshotConfig.getString("hbase.family"),
       snapshotHdfsDir      = snapshotConfig.getString("snapshot-dir"),
       hadoopConfiguration  = if (rootConfig ne null) HBaseJournalInit.getHBaseConfig(rootConfig) else null
     )

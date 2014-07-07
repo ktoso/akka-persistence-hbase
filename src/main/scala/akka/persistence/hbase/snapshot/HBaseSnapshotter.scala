@@ -8,21 +8,31 @@ import akka.persistence.hbase.common._
 import akka.persistence.hbase.journal._
 import akka.persistence.serialization.Snapshot
 import akka.persistence.{SelectedSnapshot, SnapshotMetadata, SnapshotSelectionCriteria}
-import org.apache.hadoop.hbase.util.Bytes._
+import org.apache.hadoop.hbase.CellUtil
+import org.apache.hadoop.hbase.client.HTable
 import org.hbase.async.{HBaseClient, KeyValue}
 
 import scala.collection.JavaConverters._
 import scala.collection.immutable
-import scala.concurrent.{Future, Promise}
+import scala.concurrent.Future
 import scala.util.{Failure, Success}
 
-class HBaseSnapshotter(val system: ActorSystem, val hBasePersistenceSettings: PluginPersistenceSettings, val client: HBaseClient)
+class HBaseSnapshotter(val system: ActorSystem, val hBasePersistenceSettings: PersistencePluginSettings, val client: HBaseClient)
   extends HadoopSnapshotter
-  with AsyncBaseUtils with DeferredConversions {
+  with HBaseUtils with AsyncBaseUtils with HBaseSerialization
+  with DeferredConversions {
 
   val log = system.log
 
   implicit val settings = hBasePersistenceSettings
+
+  lazy val table = hBasePersistenceSettings.snapshotTable
+
+  lazy val family = hBasePersistenceSettings.snapshotFamily
+
+  lazy val hadoopConfig = HBaseJournalInit.getHBaseConfig(system.settings.config)
+
+  lazy val hTable = new HTable(hadoopConfig, tableBytes)
 
   implicit override val pluginDispatcher = system.dispatchers.lookup("akka-hbase-persistence-dispatcher")
 
@@ -36,46 +46,40 @@ class HBaseSnapshotter(val system: ActorSystem, val hBasePersistenceSettings: Pl
 
   def loadAsync(persistenceId: String, criteria: SnapshotSelectionCriteria): Future[Option[SelectedSnapshot]] = {
     log.debug("Loading async for persistenceId: [{}] on criteria: {}", persistenceId, criteria)
-    val scanner = newScanner()
-    val SnapshotSelectionCriteria(maxSequenceNr, maxTimestamp) = criteria
 
-    val start = RowKey.firstForPersistenceId(persistenceId)
-    val stop = RowKey(selectPartition(maxSequenceNr), persistenceId, maxSequenceNr)
+    def scanPartition(): Option[SelectedSnapshot] = {
+      val startScanKey = SnapshotRowKey.firstForPersistenceId(persistenceId)
+      val stopScanKey = SnapshotRowKey.lastForPersistenceId(persistenceId, toSequenceNr = criteria.maxSequenceNr)
 
-    scanner.setStartKey(start.toBytes)
-    scanner.setStopKey(stop.toBytes)
-    scanner.setKeyRegexp(RowKey.patternForProcessor(persistenceId))
+      val scan = preparePrefixScan(tableBytes, familyBytes, stopScanKey, startScanKey, persistenceId, onlyRowKeys = false)
+      scan.addColumn(familyBytes, Message)
+      scan.setReversed(true)
+      scan.setMaxResultSize(1)
+      val scanner = hTable.getScanner(scan)
 
-    val promise = Promise[Option[SelectedSnapshot]]()
+      try {
+        var res = scanner.next()
+        while (res != null) {
+          val seqNr = RowKey.extractSeqNr(res.getRow)
+          val messageCell = res.getColumnLatestCell(familyBytes, Message)
 
-    def completePromiseWithFirstDeserializedSnapshot(in: AnyRef): Unit = in match {
-      case null =>
-        promise trySuccess None // got to end of Scan, if nothing completed, we complete with "found no valid snapshot"
-        scanner.close()
-        log.debug("Finished async load for persistenceId: [{}] on criteria: {}", persistenceId, criteria)
+          val snapshot = snapshotFromBytes(CellUtil.cloneValue(messageCell))
 
-      case rows: AsyncBaseRows =>
-        val maybeSnapshot: Option[(Long, Snapshot)] = for {
-          row      <- rows.asScala.headOption
-          srow      = row.asScala
-          seqNr     = bytesToVint(findColumn(srow, SequenceNr).value)
-          snapshot <- deserialize(findColumn(srow, Message).value).toOption
-        } yield seqNr -> snapshot
+          if (seqNr <= criteria.maxSequenceNr)
+            return Some(SelectedSnapshot(SnapshotMetadata(persistenceId, seqNr), snapshot.data)) // todo timestamp)
 
-        maybeSnapshot match {
-          case Some((seqNr, snapshot)) =>
-            val selectedSnapshot = SelectedSnapshot(SnapshotMetadata(persistenceId, seqNr), snapshot.data)
-            promise success Some(selectedSnapshot)
-
-          case None =>
-            go()
+          res = scanner.next()
         }
+
+        None
+      } finally {
+        scanner.close()
+      }
     }
 
-    def go() = scanner.nextRows(1) map completePromiseWithFirstDeserializedSnapshot
-    go()
-
-    promise.future
+    val f = Future(scanPartition())
+    f onFailure { case x => log.error(x, "Unable to read snapshot for persistenceId: {}, on criteria: {}", persistenceId, criteria) }
+    f
   }
 
   def saveAsync(meta: SnapshotMetadata, snapshot: Any): Future[Unit] = {
@@ -85,7 +89,7 @@ class HBaseSnapshotter(val system: ActorSystem, val hBasePersistenceSettings: Pl
     serialize(Snapshot(snapshot)) match {
       case Success(serializedSnapshot) =>
         executePut(
-          RowKey(selectPartition(meta.sequenceNr), meta.persistenceId, meta.sequenceNr).toBytes,
+          SnapshotRowKey(meta.persistenceId, meta.sequenceNr).toBytes,
           Array(Marker,              Message),
           Array(SnapshotMarkerBytes, serializedSnapshot)
         )
@@ -96,27 +100,27 @@ class HBaseSnapshotter(val system: ActorSystem, val hBasePersistenceSettings: Pl
   }
 
   def saved(meta: SnapshotMetadata): Unit = {
-    log.debug("Saved: {}", meta)
+    log.debug("Saved snapshot for meta: {}", meta)
     saving -= meta
   }
 
   def delete(meta: SnapshotMetadata): Unit = {
-    log.debug("Deleting: {}", meta)
+    log.debug("Deleting snapshot for meta: {}", meta)
     saving -= meta
-    executeDelete(RowKey(selectPartition(meta.sequenceNr), meta.persistenceId, meta.sequenceNr).toBytes)
+    executeDelete(SnapshotRowKey(meta.persistenceId, meta.sequenceNr).toBytes)
   }
 
   def delete(persistenceId: String, criteria: SnapshotSelectionCriteria): Unit = {
-    log.debug("Deleting persistenceId: [{}], criteria: {}", persistenceId, criteria)
+    log.debug("Deleting snapshot for persistenceId: [{}], criteria: {}", persistenceId, criteria)
 
     val scanner = newScanner()
 
-    val start = RowKey.firstForPersistenceId(persistenceId)
-    val stop = RowKey.lastForPersistenceId(persistenceId, criteria.maxSequenceNr)
+    val start = SnapshotRowKey.firstForPersistenceId(persistenceId)
+    val stop = SnapshotRowKey.lastForPersistenceId(persistenceId, criteria.maxSequenceNr)
 
     scanner.setStartKey(start.toBytes)
     scanner.setStopKey(stop.toBytes)
-    scanner.setKeyRegexp(RowKey.patternForProcessor(persistenceId))
+    scanner.setKeyRegexp(s"""$persistenceId-.*""")
 
     def handleRows(in: AnyRef): Future[Unit] = in match {
       case null =>

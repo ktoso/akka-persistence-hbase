@@ -68,7 +68,7 @@ class PersistAsyncJournalPerfSpec extends TestKit(ActorSystem("test")) with Flat
 
   lazy val config = system.settings.config
 
-  lazy val pluginConfig = PluginPersistenceSettings(config)
+  lazy val pluginConfig = PersistencePluginSettings(config)
 
   behavior of "HBaseJournal"
 

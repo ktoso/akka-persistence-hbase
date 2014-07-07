@@ -16,26 +16,34 @@ object HBaseJournalInit {
    *
    * @return true if a modification was run on hbase (table created or family added)
    */
-  def createTable(config: Config): Boolean = {
+  private[hbase] def createTable(config: Config): Boolean = {
+    val journalConfig = config.getConfig("hbase-journal")
+    val table = journalConfig.getString("table")
+    val family = journalConfig.getString("family")
+
+    createTable(config, table, family)
+  }
+
+  private[hbase] def createTable(config: Config, table: String, family: String): Boolean = {
     val conf = getHBaseConfig(config)
     val admin = new HBaseAdmin(conf)
 
-    val journalConfig = config.getConfig("hbase-journal")
-    val table = journalConfig.getString("table")
-    val familyName = journalConfig.getString("family")
-
-    try doInitTable(admin, table, familyName) finally admin.close()
+    try doInitTable(admin, table, family) finally admin.close()
   }
 
   /**
    * Disable the journal table (defined as `hbase-journal.table`).
    */
-  def disableTable(config: Config): Unit = {
-    val conf = getHBaseConfig(config)
-    val admin = new HBaseAdmin(conf)
-
+  private[hbase] def disableTable(config: Config): Unit = {
     val journalConfig = config.getConfig("hbase-journal")
     val table = journalConfig.getString("table")
+
+    disableTable(config, table)
+  }
+
+  private[hbase] def disableTable(config: Config, table: String): Unit = {
+    val conf = getHBaseConfig(config)
+    val admin = new HBaseAdmin(conf)
 
     try admin.disableTable(table) finally admin.close()
   }
@@ -43,12 +51,16 @@ object HBaseJournalInit {
   /**
    * Drop the journal table (defined as `hbase-journal.table`).
    */
-  def deleteTable(config: Config): Unit = {
-    val conf = getHBaseConfig(config)
-    val admin = new HBaseAdmin(conf)
-
+  private[hbase] def deleteTable(config: Config): Unit = {
     val journalConfig = config.getConfig("hbase-journal")
     val table = journalConfig.getString("table")
+
+    deleteTable(config, table)
+  }
+
+  private[hbase] def deleteTable(config: Config, table: String): Unit = {
+    val conf = getHBaseConfig(config)
+    val admin = new HBaseAdmin(conf)
 
     try admin.deleteTable(table) finally admin.close()
   }

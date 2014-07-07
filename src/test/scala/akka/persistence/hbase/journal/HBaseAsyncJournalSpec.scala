@@ -52,12 +52,16 @@ with Matchers with BeforeAndAfterAll {
 
   val config = system.settings.config
 
+  val pluginSettings = PersistencePluginSettings(config)
+
   behavior of "HBaseJournal"
 
   val timeout = 5.seconds
 
   override protected def beforeAll() {
-    HBaseJournalInit.createTable(config)
+    super.beforeAll()
+    HBaseJournalInit.createTable(config, pluginSettings.table, pluginSettings.family)
+    HBaseJournalInit.createTable(config, pluginSettings.snapshotTable, pluginSettings.snapshotFamily)
   }
 
   it should "write and replay messages" in {
@@ -117,7 +121,7 @@ with Matchers with BeforeAndAfterAll {
     expectMsgAllOf(max = timeout, "b", 2L, true)
   }
 
-  lazy val settings = PluginPersistenceSettings(system.settings.config)
+  lazy val settings = PersistencePluginSettings(system.settings.config)
 
   it should "delete exactly as much as needed messages" in {
     val deleteProbe = TestProbe()
@@ -160,12 +164,16 @@ with Matchers with BeforeAndAfterAll {
     probe.expectMsgType[FinishedDeletes](max = 10.seconds)
 
   override protected def afterAll() {
-    val tableName = config.getString("hbase-journal.table")
+    super.afterAll()
 
-    HBaseJournalInit.disableTable(config)
-    HBaseJournalInit.deleteTable(config)
+    HBaseJournalInit.disableTable(config, pluginSettings.table)
+    HBaseJournalInit.deleteTable(config, pluginSettings.table)
+
+    HBaseJournalInit.disableTable(config, pluginSettings.snapshotTable)
+    HBaseJournalInit.deleteTable(config, pluginSettings.snapshotTable)
+
     HBaseClientFactory.reset()
 
-    system.shutdown()
+    shutdown(system)
   }
 }

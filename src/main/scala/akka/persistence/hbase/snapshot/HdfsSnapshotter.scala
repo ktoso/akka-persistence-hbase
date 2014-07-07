@@ -4,7 +4,7 @@ import akka.persistence.{SelectedSnapshot, SnapshotSelectionCriteria, SnapshotMe
 import scala.concurrent.Future
 import org.apache.hadoop.fs.{FileStatus, Path, FileSystem}
 import akka.actor.ActorSystem
-import akka.persistence.hbase.journal.PluginPersistenceSettings
+import akka.persistence.hbase.journal.PersistencePluginSettings
 import java.net.URI
 import org.apache.hadoop.conf.Configuration
 import org.apache.commons.io.FilenameUtils
@@ -18,7 +18,7 @@ import scala.collection.immutable
 /**
 * Dump and read Snapshots to/from HDFS.
 */
-class HdfsSnapshotter(val system: ActorSystem, settings: PluginPersistenceSettings)
+class HdfsSnapshotter(val system: ActorSystem, settings: PersistencePluginSettings)
   extends HadoopSnapshotter {
 
   val log = system.log

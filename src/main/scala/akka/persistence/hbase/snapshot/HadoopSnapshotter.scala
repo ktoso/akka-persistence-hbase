@@ -13,7 +13,8 @@ import akka.serialization.SerializationExtension
 trait HadoopSnapshotter extends Extension {
 
   def system: ActorSystem
-  protected val serialization = SerializationExtension(system)
+
+  val serialization = SerializationExtension(system)
 
   def loadAsync(persistenceId: String, criteria: SnapshotSelectionCriteria): Future[Option[SelectedSnapshot]]
 

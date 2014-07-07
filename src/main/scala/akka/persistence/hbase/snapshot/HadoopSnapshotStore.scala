@@ -8,7 +8,7 @@ import akka.actor.ActorLogging
 
 class HadoopSnapshotStore extends SnapshotStore with ActorLogging {
 
-  val snap = HadoopSnapshotterExtensionId(context.system)
+  val snap = HadoopSnapshotterExtension(context.system)
 
   def loadAsync(persistenceId: String, criteria: SnapshotSelectionCriteria): Future[Option[SelectedSnapshot]] =
     snap.loadAsync(persistenceId, criteria)
@@ -25,3 +25,4 @@ class HadoopSnapshotStore extends SnapshotStore with ActorLogging {
   def delete(persistenceId: String, criteria: SnapshotSelectionCriteria): Unit =
     snap.delete(persistenceId, criteria)
 }
+

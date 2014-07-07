@@ -1,7 +1,6 @@
 package akka.persistence.hbase.journal
 
 import java.util.concurrent.atomic.AtomicBoolean
-import java.{util => ju}
 
 import akka.actor.{Actor, ActorLogging, ActorRef, Props}
 import akka.persistence.PersistentRepr
@@ -9,9 +8,6 @@ import akka.persistence.hbase.common.RowKey
 import akka.persistence.hbase.journal.Resequencer.AllPersistentsSubmitted
 import akka.persistence.journal._
 import org.apache.hadoop.hbase.CellUtil
-import org.apache.hadoop.hbase.client.Scan
-import org.apache.hadoop.hbase.filter.CompareFilter.CompareOp
-import org.apache.hadoop.hbase.filter._
 import org.apache.hadoop.hbase.util.Bytes
 import org.hbase.async.{HBaseClient, KeyValue}
 
@@ -23,7 +19,7 @@ trait HBaseAsyncRecovery extends AsyncRecovery {
 
   private[persistence] def client: HBaseClient
 
-  private[persistence] implicit def hBasePersistenceSettings: PluginPersistenceSettings
+  private[persistence] implicit def hBasePersistenceSettings: PersistencePluginSettings
 
   private lazy val replayDispatcherId = hBasePersistenceSettings.replayDispatcherId
 
@@ -62,7 +58,7 @@ trait HBaseAsyncRecovery extends AsyncRecovery {
 
         log.debug("Scanning {} partition for replay, from {} to {}", part, startScanKey.toKeyString, stopScanKey.toKeyString)
 
-        val scan = preparePartitionScan(startScanKey, stopScanKey, persistenceIdRowRegex, onlyRowKeys = false)
+        val scan = preparePartitionScan(tableBytes, familyBytes, startScanKey, stopScanKey, persistenceIdRowRegex, onlyRowKeys = false)
         val scanner = hTable.getScanner(scan)
 
         var lowestSeqNr: Long = 0L
@@ -82,8 +78,8 @@ trait HBaseAsyncRecovery extends AsyncRecovery {
             // Since this is multiple scans, on multiple partitions, they are not ordered, yet we must deliver ordered messages
             // to the receiver. Only the resequencer knows how many are really "delivered"
 
-            val markerCell = res.getColumnLatestCell(FamilyBytes, Marker)
-            val messageCell = res.getColumnLatestCell(FamilyBytes, Message)
+            val markerCell = res.getColumnLatestCell(familyBytes, Marker)
+            val messageCell = res.getColumnLatestCell(familyBytes, Message)
 
             if ((markerCell ne null) && (messageCell ne null)) {
               val marker = Bytes.toString(CellUtil.cloneValue(markerCell))
@@ -117,7 +113,7 @@ trait HBaseAsyncRecovery extends AsyncRecovery {
           }
           lowestSeqNr
         } finally {
-          log.debug("Done scheduling replays in partition {} (lowest seqNr: {})", part, lowestSeqNr)
+          if (lowestSeqNr > 0) log.debug("Done scheduling replays in partition {} (lowest seqNr: {})", part, lowestSeqNr)
           scanner.close()
         }
       }
@@ -151,7 +147,7 @@ trait HBaseAsyncRecovery extends AsyncRecovery {
 
 //      log.debug("Scanning {} partition, from {} to {}", part, startScanKey.toKeyString, stopScanKey.toKeyString)
 
-      val scan = preparePartitionScan(startScanKey, stopScanKey, persistenceIdRowRegex, onlyRowKeys = true)
+      val scan = preparePartitionScan(tableBytes, familyBytes, startScanKey, stopScanKey, persistenceIdRowRegex, onlyRowKeys = true)
       val scanner = hTable.getScanner(scan)
 
       var highestSeqNr: Long = 0L
@@ -165,7 +161,7 @@ trait HBaseAsyncRecovery extends AsyncRecovery {
         }
         highestSeqNr
       } finally {
-        log.debug("Done scheduling replays in partition {} (highest seqNr: {})", part, highestSeqNr)
+        if (highestSeqNr > 0) log.debug("Done scheduling replays in partition {} (highest seqNr: {})", part, highestSeqNr)
         scanner.close()
       }
     }
@@ -178,62 +174,10 @@ trait HBaseAsyncRecovery extends AsyncRecovery {
       log.debug("Found highest seqNr for persistenceId: {}, it's: {}", persistenceId, seqNr)
       seqNr
     }
-
-
-
-//    val scanner = newScanner()
-//    scanner.setStartKey(RowKey(selectPartition(fromSequenceNr), persistenceId, fromSequenceNr).toBytes)
-//    scanner.setStartKey(RowKey.lastForPersistenceId(persistenceId).toBytes)
-//    scanner.setKeyRegexp(RowKey.patternForProcessor(persistenceId))
-//
-//    def handleRows(in: AnyRef): Future[Long] = in match {
-//      case null =>
-//        scanner.close()
-//        Future(0)
-//
-//      case rows: AsyncBaseRows =>
-//        log.debug(s"AsyncReadHighestSequenceNr - got ${rows.size} rows...")
-//
-//        val maxSoFar = rows.asScala.map(cols => sequenceNr(cols.asScala)).max
-//
-//        go() map { reachedSeqNr =>
-//          math.max(reachedSeqNr, maxSoFar)
-//        }
-//    }
-//
-//    def go() = scanner.nextRows(hBasePersistenceSettings.scanBatchSize) flatMap handleRows
-//
-//    go() map { case l =>
-//      log.debug("Finished scanning for highest sequence number: {}", l)
-//      l
-//    }
   }
 
 
 //  end of async recovery plugin impl
-
-  private def preparePartitionScan(startScanKey: RowKey, stopScanKey: RowKey, persistenceIdRowRegex: String, onlyRowKeys: Boolean): Scan = {
-    val scan = new Scan
-    scan.setStartRow(startScanKey.toBytes) // inclusive
-    scan.setStopRow(stopScanKey.toBytes) // exclusive
-    scan.setBatch(hBasePersistenceSettings.scanBatchSize)
-
-    val filter = if (onlyRowKeys) {
-      val fl = new FilterList()
-      fl.addFilter(new FirstKeyOnlyFilter)
-      fl.addFilter(new KeyOnlyFilter)
-      fl.addFilter(new RowFilter(CompareOp.EQUAL, new RegexStringComparator(persistenceIdRowRegex)))
-      fl
-    } else {
-      scan.addColumn(FamilyBytes, Marker)
-      scan.addColumn(FamilyBytes, Message)
-
-      new RowFilter(CompareOp.EQUAL, new RegexStringComparator(persistenceIdRowRegex))
-    }
-
-    scan.setFilter(filter)
-    scan
-  }
 
   private def sequenceNr(columns: mutable.Buffer[KeyValue]): Long = {
     val messageKeyValue = findColumn(columns, Message)

@@ -10,7 +10,7 @@ class RowKeySpec extends TestKit(ActorSystem("test")) with FlatSpecLike
 
   behavior of "RowKey"
 
-  implicit val settings = PluginPersistenceSettings(system.settings.config)
+  implicit val settings = PersistencePluginSettings(system.settings.config)
 
   it should "find first key in partition" in {
     val rowKeys = for {
