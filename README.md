@@ -15,11 +15,14 @@ The artifact is published to Maven Central, so in order to use it you just have 
 
 ```
 // build.sbt style:
-libraryDependencies += "pl.project13.scala" %% "akka-persistence-hbase" % "0.3"
+libraryDependencies += "pl.project13.scala" %% "akka-persistence-hbase" % "0.4.0"
 ```
 
-Please note that only versions `0.3+` are compatible with the latests Akka version (`2.3-SNAPSHOT`, today is: 20 Jan 2013).
-This version of the API should be stable though, so go ahead and give it a spin!
+Compatibility grid:
+
+| HBase plugin   | Akka Persistence    | 
+| -------------- |:-------------------:| 
+| `0.0.4`        | `2.3.4+`            |
 
 Configuration
 -------------
@@ -42,13 +45,22 @@ To activate the _HBase_ snapshot store implementation add the following line to 
 # enable the hadoop-snapshot-store
 akka.persistence.snapshot-store.plugin = "hadoop-snapshot-store"
 
-# and select the snapshotter implementation
+# optional configuration:
 hadoop-snapshot-store {
-  impl = "akka.persistence.hbase.snapshot.HBaseSnapshotter"
+  hbase {
+    # Name of the table to be used by the journal
+    table = "akka_snapshots"
+
+    # Name of the family to be used by the journal
+    family = "snapshot"
+  }
 }
 ```
 
 ### SnapshotStore - HDFS
+
+**Will be deprecated in favour of it's own plugin. Please search for `akka-persistence-hdfs`.**
+
 For snapshots it may be sometimes smarter to store them in HDFS directly, instead of in HBase.
 This has a few advantages - it's nicer to deal with a "very big" snapshot this way, and you can easily download it by using
 plain hadoop command line tooling if needed.
@@ -58,8 +70,7 @@ plain hadoop command line tooling if needed.
 akka.persistence.snapshot-store.plugin = "hadoop-snapshot-store"
 
 hadoop-snapshot-store {
-  # and select the snapshotter implementation
-  impl = "akka.persistence.hbase.snapshot.HdfsSnapshotter"
+  mode = hdfs
 
   # and set the directory where the snapshots should be saved to
   snapshot-dir = "/akka-snapshots"
@@ -78,16 +89,9 @@ Recovery time for 45000 messages was around 3 seconds (keep in mind, my Actor do
 
 **Async:** Even though in the code it looks like it issues one `Put` at a time, this is not the case, as writes are buffered and then batch written thanks to AsyncBase.
 
-TODO
-----
-
-* Scans can be made more parallel - due to the fact we have "partitions"
-* HDFS snapshots (~HBase snapshots are done already~)
-* Stress testing and some metrics
-
 More akka-persistence backends:
 -------------------------------
-A list is maintained here: https://gist.github.com/krasserm/8612920#file-akka-persistence-plugins-md
+A full list of community driven persistence plugins is maintained here: [akka persistence plugins @ akka.io/community](http://akka.io/community/#plugins-to-akka-persistence)
 
 License
 -------
@@ -98,7 +102,3 @@ Kudos
 -----
 
 Heads up to _Martin Krasser_ who helped with this project by nice links as well as his [akka-persistence-cassandra](https://github.com/krasserm/akka-persistence-cassandra) plugin and eventsourced.
-
-
-[![Bitdeli Badge](https://d2weczhvl823v0.cloudfront.net/ktoso/akka-persistence-hbase/trend.png)](https://bitdeli.com/free "Bitdeli Badge")
-
