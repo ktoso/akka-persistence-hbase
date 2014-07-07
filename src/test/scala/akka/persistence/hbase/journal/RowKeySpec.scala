@@ -1,18 +1,13 @@
 package akka.persistence.hbase.journal
 
-import akka.actor.ActorSystem
 import akka.persistence.hbase.common.RowKey
-import akka.testkit.{ImplicitSender, TestKit}
-import org.scalatest.{BeforeAndAfterAll, FlatSpecLike, Matchers}
+import org.scalatest.{FlatSpec, Matchers}
 
-class RowKeySpec extends TestKit(ActorSystem("test")) with FlatSpecLike
-  with ImplicitSender with Matchers with BeforeAndAfterAll {
+class RowKeySpec extends FlatSpec with Matchers {
 
   behavior of "RowKey"
 
-  val config = system.settings.config
-
-  implicit val settings = PersistencePluginSettings(config)
+  implicit val journalConfig = new PersistencePluginSettings(null, null, null, 50, 1, null, null, false, null, null, null, null)
 
   it should "find first key in partition" in {
     val rowKeys = for {
@@ -74,18 +69,6 @@ class RowKeySpec extends TestKit(ActorSystem("test")) with FlatSpecLike
     keys should contain ("050-x-00000000000000000007")
 
     rowKeys.map(_.part) should equal ((1 to 50).toList)
-  }
-
-  override def afterAll() {
-    shutdown(system)
-
-    HBaseJournalInit.disableTable(config, settings.table)
-    HBaseJournalInit.deleteTable(config, settings.table)
-
-    HBaseJournalInit.disableTable(config, settings.snapshotTable)
-    HBaseJournalInit.deleteTable(config, settings.snapshotTable)
-
-    super.afterAll()
   }
 
 }
