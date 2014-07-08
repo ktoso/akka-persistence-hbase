@@ -81,11 +81,13 @@ hadoop-snapshot-store {
 
 For more configuration options check the sources of [reference.conf](https://github.com/ktoso/akka-persistence-hbase/blob/master/src/main/resources/reference.conf).
 
-What to expect
---------------
-**Is performance OK?** I did a brief and **naive** test recently (won't even call it a benchmark ;-)), but in general the plugin was able to write "from `!` to __persisted in hbase__" with around 6000 ~ 8000 messages per second.
+Perf characteristics
+--------------------
+I did a brief and **naive** test recently (won't even call it a benchmark ;-)), but in general the plugin was able to write "from `!` to __persisted in hbase__" with around 6000 ~ 8000 messages per second.
 This was tested using 3 region servers (small instances) on the Google Compute Engine, with batch writes of 200 items per batch, 50 partitions (key prefix) and 4 regions.
 Recovery time for 45000 messages was around 3 seconds (keep in mind, my Actor does nothing, just receives the replayed message).
+
+**Hotspot avoidance** HBase users will probably know that writing sequential keys is pretty bad for HBase as it forces one region server to do all the work (take all the writes), while the rest of the cluster sitts there doing nothing -- that's pretty bad for scaling out. Similarily to http://blog.sematext.com/2012/04/09/hbasewd-avoid-regionserver-hotspotting-despite-writing-records-with-sequential-keys/ this plugin avoids hotspotting by seeding each write with a partition number, so the key is in format `partition-persistenceId-seqNr`. Thanks to this multiple servers take part in writes - and you can scale out better. For reads this obviously is a bit worse - but thanks to running scans on each partition in *parallel* (and then resequencing them so theythe events arrive in the expected order) the performance is actually quite reasonable.
 
 **Async:** Even though in the code it looks like it issues one `Put` at a time, this is not the case, as writes are buffered and then batch written thanks to AsyncBase.
 
