@@ -38,9 +38,13 @@ trait HBaseUtils {
    * For snapshots
    */
   def preparePrefixScan(table: Array[Byte], family: Array[Byte], startScanKey: SnapshotRowKey, stopScanKey: SnapshotRowKey, persistenceIdPrefix: String, onlyRowKeys: Boolean): Scan = {
+    preparePrefixScan(table, family, startScanKey.toBytes, stopScanKey.toBytes, persistenceIdPrefix, onlyRowKeys)
+  }
+
+  def preparePrefixScan(table: Array[Byte], family: Array[Byte], startScanKey: Array[Byte], stopScanKey: Array[Byte], persistenceIdPrefix: String, onlyRowKeys: Boolean): Scan = {
     val scan = new Scan
-    scan.setStartRow(startScanKey.toBytes) // inclusive
-    scan.setStopRow(stopScanKey.toBytes) // exclusive
+    scan.setStartRow(startScanKey) // inclusive
+    scan.setStopRow(stopScanKey) // exclusive
     scan.setBatch(hBasePersistenceSettings.scanBatchSize)
 
     scan.setFilter(new PrefixFilter(Bytes.toBytes(persistenceIdPrefix)))

@@ -1,5 +1,6 @@
 package akka.persistence.hbase.journal
 
+import java.io.IOException
 import java.util.concurrent.atomic.AtomicBoolean
 
 import akka.actor.{Actor, ActorLogging, ActorRef, Props}
@@ -49,7 +50,8 @@ trait HBaseAsyncRecovery extends AsyncRecovery {
 
       def scanPartition(part: Long, resequencer: ActorRef): Long = {
         val startScanKey = RowKey.firstInPartition(persistenceId, part, fromSequenceNr) // 021-ID-0000000000000000021
-        val stopScanKey = RowKey.lastInPartition(persistenceId, part, toSequenceNr) // 021-ID-9223372036854775800
+        val stopSequenceNr = if (toSequenceNr < Long.MaxValue) toSequenceNr + 1 else Long.MaxValue
+        val stopScanKey = RowKey.lastInPartition(persistenceId, part, stopSequenceNr) // 021-ID-9223372036854775800
         val persistenceIdRowRegex = RowKey.patternForProcessor(persistenceId) //  .*-ID-.*
 
         // we can avoid canning some partitions - guaranteed to be empty for smaller than the partition number seqNrs
@@ -142,7 +144,9 @@ trait HBaseAsyncRecovery extends AsyncRecovery {
 
     def scanPartitionForMaxSeqNr(part: Long): Long = {
       val startScanKey = RowKey.firstInPartition(persistenceId, part, fromSequenceNr) // 021-ID-0000000000000000021
-      val stopScanKey = RowKey.lastInPartition(persistenceId, part)                   // 021-ID-9223372036854775897
+      val toSequenceNr = RowKey.lastSeqNrInPartition(part)
+      val stopSequenceNr = if (toSequenceNr < Long.MaxValue) toSequenceNr + 1 else Long.MaxValue
+      val stopScanKey = RowKey.lastInPartition(persistenceId, part, stopSequenceNr)   // 021-ID-9223372036854775897
       val persistenceIdRowRegex = RowKey.patternForProcessor(persistenceId)           //  .*-ID-.*
 
 //      log.debug("Scanning {} partition, from {} to {}", part, startScanKey.toKeyString, stopScanKey.toKeyString)
@@ -232,7 +236,10 @@ private[hbase] class Resequencer(
       }
 
       if (delayed.isEmpty) completeResequencing()
-      else allSubmitted = true
+      else {
+        allSubmitted = true
+        failResequencing()
+      }
   }
 
   @scala.annotation.tailrec
@@ -262,6 +269,11 @@ private[hbase] class Resequencer(
   private def completeResequencing() {
     log.debug("All messages have been resequenced and applied (until seqNr: {}, nr of messages: {})!", deliveredSeqNr, deliveredMsgs)
     reachedSeqNr success deliveredSeqNr
+    context stop self
+  }
+  private def failResequencing() {
+    log.error("All persistents supbmitted but delayed is not empty, some messages must fail to replay.")
+    reachedSeqNr failure new IOException("Failed to complete resequence replay msgs.")
     context stop self
   }
 }
