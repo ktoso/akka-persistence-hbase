@@ -20,7 +20,7 @@ val akkaVersion = "2.3.4"
 
 val hadoopVersion = "1.2.1"
 
-val hbaseVersion = "0.98.3-hadoop1"
+val hbaseVersion = "0.98.11-hadoop1"
 
 libraryDependencies += "org.apache.hadoop" % "hadoop-core"   % hadoopVersion
 

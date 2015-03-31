@@ -10,6 +10,7 @@ import akka.persistence.serialization.Snapshot
 import akka.persistence.{SelectedSnapshot, SnapshotMetadata, SnapshotSelectionCriteria}
 import org.apache.hadoop.hbase.CellUtil
 import org.apache.hadoop.hbase.client.HTable
+import org.apache.hadoop.hbase.util.Bytes
 import org.hbase.async.{HBaseClient, KeyValue}
 
 import scala.collection.JavaConverters._
@@ -46,10 +47,10 @@ class HBaseSnapshotter(val system: ActorSystem, val hBasePersistenceSettings: Pe
     log.debug("Loading async for persistenceId: [{}] on criteria: {}", persistenceId, criteria)
 
     def scanPartition(): Option[SelectedSnapshot] = {
-      val startScanKey = SnapshotRowKey.firstForPersistenceId(persistenceId)
-      val stopScanKey = SnapshotRowKey.lastForPersistenceId(persistenceId, toSequenceNr = criteria.maxSequenceNr)
+      val startScanKey = SnapshotRowKey.lastForPersistenceId(persistenceId, toSequenceNr = criteria.maxSequenceNr)
+      val stopScanKey = persistenceId
 
-      val scan = preparePrefixScan(tableBytes, familyBytes, stopScanKey, startScanKey, persistenceId, onlyRowKeys = false)
+      val scan = preparePrefixScan(tableBytes, familyBytes, startScanKey.toBytes, Bytes.toBytes(stopScanKey), persistenceId, onlyRowKeys = false)
       scan.addColumn(familyBytes, Message)
       scan.setReversed(true)
       scan.setMaxResultSize(1)
@@ -114,7 +115,8 @@ class HBaseSnapshotter(val system: ActorSystem, val hBasePersistenceSettings: Pe
     val scanner = newScanner()
 
     val start = SnapshotRowKey.firstForPersistenceId(persistenceId)
-    val stop = SnapshotRowKey.lastForPersistenceId(persistenceId, criteria.maxSequenceNr)
+    val stopSequenceNr = if (criteria.maxSequenceNr < Long.MaxValue) criteria.maxSequenceNr + 1 else Long.MaxValue
+    val stop = SnapshotRowKey.lastForPersistenceId(persistenceId, stopSequenceNr)
 
     scanner.setStartKey(start.toBytes)
     scanner.setStopKey(stop.toBytes)

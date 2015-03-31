@@ -84,8 +84,9 @@ class HBaseAsyncWriteJournal extends Actor with ActorLogging
     val doDelete = deleteFunctionFor(permanent)
 
     def scanAndDeletePartition(part: Long, operator: ActorRef): Unit = {
+      val stopSequenceNr = if (toSequenceNr < Long.MaxValue) toSequenceNr + 1 else Long.MaxValue
       val startScanKey = RowKey.firstInPartition(persistenceId, part)                 // 021-ID-000000000000000000
-      val stopScanKey = RowKey.lastInPartition(persistenceId, part, toSequenceNr + 1) // 021-ID-9223372036854775800
+      val stopScanKey = RowKey.lastInPartition(persistenceId, part, stopSequenceNr) // 021-ID-9223372036854775800
       val persistenceIdRowRegex = RowKey.patternForProcessor(persistenceId)           //  .*-ID-.*
 
       // we can avoid canning some partitions - guaranteed to be empty for smaller than the partition number seqNrs

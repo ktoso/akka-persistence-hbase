@@ -49,6 +49,7 @@ object RowKey {
   def lastInPartition(persistenceId: String, partition: Long, toSequenceNr: Long = Long.MaxValue)(implicit journalConfig: PersistencePluginSettings) = {
     require(partition > 0, s"partition must be > 0, ($partition)")
     require(partition <= journalConfig.partitionCount, s"partition must be <= partitionCount, ($partition <!= ${journalConfig.partitionCount})")
+    require(toSequenceNr >= 0, s"toSequenceNr must be >= 0, ($toSequenceNr)")
 
     new RowKey(selectPartition(partition)(journalConfig), persistenceId, toSequenceNr)
   }
